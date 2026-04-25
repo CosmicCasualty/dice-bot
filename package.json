@@ -1,0 +1,17 @@
+json{
+  "name": "discord-dice-bot",
+  "version": "1.0.0",
+  "description": "RPG dice bot for Discord",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "discord.js": "^14.14.1",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
