@@ -188,8 +188,6 @@ class DB {
   recordSkillRoll(charId, skill, ability, diceResult, modifier, total) {
     const char = this.getCharacterById(charId);
     if (!char) return;
-    const isCrit   = diceResult === 30;
-    const isFumble = diceResult === 1;
     this.db.prepare(`
       INSERT INTO roll_history (char_id, user_id, username, char_name, skill, ability, dice_result, modifier, total)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -197,10 +195,8 @@ class DB {
     this.db.prepare(`
       UPDATE characters SET
         total_rolls = total_rolls + 1,
-        crits   = crits   + ?,
-        fumbles = fumbles + ?
       WHERE id = ?
-    `).run(isCrit ? 1 : 0, isFumble ? 1 : 0, charId);
+    `)
   }
 
   getRollHistory(charId, limit = 10) {
