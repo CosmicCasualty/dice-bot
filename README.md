@@ -23,9 +23,6 @@ All skill checks roll: **d30 + Skill + Parent Ability**
 
 > Example: `/roll skill:athletics` → rolls d30 + Athletics + Physique
 
-- 🌟 **Critical** = natural 30
-- 💀 **Fumble** = natural 1
-
 ### Derived Traits
 
 | Trait | Formula |
