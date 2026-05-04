@@ -204,7 +204,7 @@ function skillRollEmbed(char, skill, ability, rollData, label) {
 
 // ─── Event: Ready ─────────────────────────────────────────────────────────────
 
-client.once('clientReady', async () => {
+client.once('ready', async () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
   await registerCommands();
 });
