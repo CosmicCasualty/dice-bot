@@ -1,7 +1,7 @@
 /**
- * DiceEngine — handles all dice rolling for the RPG system.
+ * DiceEngine — handles all dice rolling for the Archive Dice system.
  *
- * Primary roll: d30 + skill modifier + parent ability modifier
+ * Primary roll: d20 + skill modifier + parent ability modifier
  * Also retains free-form notation rolling for /roll raw.
  */
 
@@ -13,22 +13,20 @@ class DiceEngine {
    * @param {number} skillMod  - the character's skill value
    * @param {string} ability   - e.g. 'physique'
    * @param {number} abilityMod - the character's ability value
-   * @returns {{ diceResult, modifier, total, isCrit, isFumble, breakdown }}
+   * @returns {{ diceResult, modifier, total, breakdown }}
    */
   rollSkill(skill, skillMod, ability, abilityMod) {
-    const diceResult = Math.floor(Math.random() * 30) + 1;
+    const diceResult = Math.floor(Math.random() * 20) + 1;
     const modifier = skillMod + abilityMod;
     const total = diceResult + modifier;
-    const isCrit   = diceResult === 30;
-    const isFumble = diceResult === 1;
 
     const modStr = modifier === 0 ? '' :
       modifier > 0 ? ` + ${modifier} (${this._cap(skill)} ${skillMod} + ${this._cap(ability)} ${abilityMod})` :
                      ` − ${Math.abs(modifier)} (${this._cap(skill)} ${skillMod} + ${this._cap(ability)} ${abilityMod})`;
 
-    const breakdown = `[d30: **${diceResult}**]${modStr}`;
+    const breakdown = `[d20: **${diceResult}**]${modStr}`;
 
-    return { diceResult, modifier, total, isCrit, isFumble, breakdown };
+    return { diceResult, modifier, total, breakdown };
   }
 
   /**
@@ -69,8 +67,6 @@ class DiceEngine {
       return {
         success: true, total, rolls, kept, breakdown, min, max,
         modifier: parsed.modifier,
-        isCrit:   diceSum === parsed.count * parsed.sides,
-        isFumble: diceSum === parsed.count,
       };
     } catch (e) {
       return { success: false, error: e.message };
