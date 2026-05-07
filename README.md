@@ -19,9 +19,9 @@ Each character has four **Abilities**, each with child **Skills**:
 
 ### Rolling
 
-All skill checks roll: **d20 + Skill + Parent Ability**
+All skill checks roll: **d30 + Skill + Parent Ability**
 
-> Example: `/roll skill:athletics` → rolls d20 + Athletics + Physique
+> Example: `/roll skill:athletics` → rolls d30 + Athletics + Physique
 
 ### Derived Traits
 
@@ -49,7 +49,7 @@ Traits update automatically whenever stats change.
 | `/character delete id:<id>` | Delete a character |
 | `/profile` | View your active character sheet |
 | `/profile user:@someone` | View another player's active character |
-| `/roll skill:<skill>` | Roll a skill check (d20 + skill + ability) |
+| `/roll skill:<skill>` | Roll a skill check (d30 + skill + ability) |
 | `/roll skill:<skill> label:<text>` | Roll with a custom label |
 | `/rollraw dice:<notation>` | Free-form dice roll (e.g. `2d6+3`, `d20`) |
 | `/history` | View your active character's last 10 rolls |
@@ -106,7 +106,7 @@ Commands register globally on first start (can take up to 1 hour to propagate).
 ```
 discord-dice-bot/
 ├── bot.js          # Slash commands, interactions, embeds
-├── diceEngine.js   # d20 skill rolling + free-form notation
+├── diceEngine.js   # d30 skill rolling + free-form notation
 ├── database.js     # SQLite: characters, stats, roll history
 ├── package.json
 ├── .env.example
@@ -129,7 +129,7 @@ discord-dice-bot/
    → Bot: Athletics leveled up 0 → 1.
 
 4. Player: /roll skill:athletics
-   → Bot: d20 + Athletics (1) + Physique (3) = total shown.
+   → Bot: d30 + Athletics (1) + Physique (3) = total shown.
 
 5. Player: /profile
    → Bot: Full character sheet with all traits.

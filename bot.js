@@ -47,11 +47,11 @@ const commands = [
     .setDescription('View your active character sheet')
     .addUserOption(o => o.setName('user').setDescription('View another user\'s active character').setRequired(false)),
 
-  // /roll — roll a skill (d20 + skill + ability)
+  // /roll — roll a skill (d30 + skill + ability)
   new SlashCommandBuilder()
     .setName('roll')
-    .setDescription('Roll a skill check (d20 + skill + parent ability)')
-    .addStringOption(o => d20
+    .setDescription('Roll a skill check (d30 + skill + parent ability)')
+    .addStringOption(o => o
       .setName('skill')
       .setDescription('Skill to roll')
       .setRequired(true)
@@ -162,7 +162,7 @@ function characterSheetEmbed(char, avatarUrl = null) {
       },
       {
         name: '📊 Roll Stats',
-        value: `Rolls: **${char.total_rolls}**`,
+        value: `Rolls: **${char.total_rolls}** | Crits: **${char.crits}** | Fumbles: **${char.fumbles}**`,
         inline: false,
       }
     )
@@ -174,6 +174,10 @@ function characterSheetEmbed(char, avatarUrl = null) {
 
 /** Build a roll result embed */
 function skillRollEmbed(char, skill, ability, rollData, label) {
+  const threshold30 = rollData.diceResult === 30;
+  const threshold1  = rollData.diceResult === 1;
+
+  const color = threshold30 ? 0x22c55e : threshold1 ? 0xef4444 : 0x7c3aed;
 
   const embed = new EmbedBuilder()
     .setColor(color)
@@ -191,6 +195,9 @@ function skillRollEmbed(char, skill, ability, rollData, label) {
     )
     .setFooter({ text: `Character: ${char.char_name}` })
     .setTimestamp();
+
+  if (threshold30) embed.addFields({ name: '🌟 CRITICAL HIT!', value: 'Rolled a 30 — maximum result!' });
+  if (threshold1)  embed.addFields({ name: '💀 FUMBLE!',       value: 'Rolled a 1 — minimum result!' });
 
   return embed;
 }
@@ -323,6 +330,7 @@ client.on('interactionCreate', async interaction => {
       return interaction.editReply(`❌ ${result.error}`);
     }
 
+    const color = result.isCrit ? 0x22c55e : result.isFumble ? 0xef4444 : 0x7c3aed;
     const embed = new EmbedBuilder()
       .setColor(color)
       .setTitle(`🎲 ${label || 'Free Roll'}`)
@@ -333,6 +341,9 @@ client.on('interactionCreate', async interaction => {
         { name: 'Range', value: `${result.min} – ${result.max}`, inline: true },
       )
       .setTimestamp();
+
+    if (result.isCrit)   embed.addFields({ name: '🌟 MAX ROLL!', value: 'Highest possible result!' });
+    if (result.isFumble) embed.addFields({ name: '💀 MIN ROLL!', value: 'Lowest possible result!' });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -356,7 +367,7 @@ client.on('interactionCreate', async interaction => {
       .setColor(0x7c3aed)
       .setTitle(`📜 ${char.char_name}'s Recent Rolls`)
       .setDescription(history.map((r, i) =>
-        `**${i + 1}.** ${r.skill ? `${capitalize(r.skill)} (${capitalize(r.ability)})` : 'Free roll'} → **${r.total}** *(d20: ${r.dice_result})* <t:${Math.floor(new Date(r.rolled_at).getTime() / 1000)}:R>`
+        `**${i + 1}.** ${r.skill ? `${capitalize(r.skill)} (${capitalize(r.ability)})` : 'Free roll'} → **${r.total}** *(d30: ${r.dice_result})* <t:${Math.floor(new Date(r.rolled_at).getTime() / 1000)}:R>`
       ).join('\n'))
       .setFooter({ text: 'Last 10 rolls' });
 
@@ -445,6 +456,7 @@ client.on('interactionCreate', async interaction => {
   const result = dice.roll(notation);
   if (!result.success) return interaction.reply({ content: `❌ ${result.error}`, ephemeral: true });
 
+  const color = result.isCrit ? 0x22c55e : result.isFumble ? 0xef4444 : 0x7c3aed;
   const embed = new EmbedBuilder()
     .setColor(color)
     .setTitle('🎲 Re-Roll')
