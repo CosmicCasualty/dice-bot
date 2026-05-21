@@ -140,7 +140,7 @@ function characterSheetEmbed(char, avatarUrl = null) {
   }).join('\n\n');
 
   const embed = new EmbedBuilder()
-    .setColor(0x7c3aed)
+    .setColor(0xE3311D)
     .setTitle(`📜 ${char.char_name}`)
     .setDescription(`*Character of <@${char.user_id}>*  •  ID: \`${char.id}\``)
     .addFields(
