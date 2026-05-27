@@ -1,17 +1,17 @@
 {
-  "name": "discord-dice-bot",
-  "version": "1.0.0",
-  "description": "RPG dice bot for Discord",
+  "name": "discord-rpg-dice-bot",
+  "version": "2.0.0",
+  "description": "Discord d20 RPG dice bot with characters, AP, sheets, and player-chosen level ups.",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.3",
-    "discord.js": "^14.14.1",
-    "dotenv": "^16.4.5"
+    "better-sqlite3": "^11.9.1",
+    "discord.js": "^14.17.3",
+    "dotenv": "^16.4.7"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=18"
   }
 }

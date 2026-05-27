@@ -1,41 +1,48 @@
-# 🎲 Discord RPG Dice Bot
+# Discord RPG Dice Bot
 
-A Discord bot for a custom tabletop RPG system with character profiles, abilities, skills, derived traits, and moderator-controlled progression.
+A Discord bot for a custom d20 tabletop RPG system with saved characters, ability and skill rolls, action points, character sheets, and admin-granted player-chosen level-ups.
 
----
+## Main Rules
 
-## System Overview
+### Abilities and Skills
 
-### Abilities & Skills
-
-Each character has four **Abilities**, each with child **Skills**:
+Each character has four abilities, each with child skills:
 
 | Ability | Skills |
 |---|---|
-| **Physique** | Athletics, Melee, Resilience |
-| **Agility** | Aiming, Stealth, Reflex, Finesse |
-| **Reason** | Awareness, Medicine, Technology, Academia |
-| **Presence** | Morale, Intimidation, Persuasion, Deception |
+| Physique | Athletics, Melee, Resilience |
+| Agility | Aiming, Stealth, Reflex, Finesse |
+| Reason | Awareness, Medicine, Technology, Academia |
+| Presence | Morale, Intimidation, Persuasion, Deception |
 
 ### Rolling
 
-All skill checks roll: **d30 + Skill + Parent Ability**
+Skill checks always roll:
 
-> Example: `/roll skill:athletics` → rolls d30 + Athletics + Physique
+```text
+d20 + parent ability + skill
+```
+
+Ability checks roll:
+
+```text
+d20 + ability
+```
+
+Natural 20s are criticals. Natural 1s are fumbles.
 
 ### Derived Traits
 
-| Trait | Formula |
-|---|---|
-| ❤️ Health | 5 + Physique + ⌊Resilience ÷ 2⌋ |
-| 🏃 Movement | 3 + ⌊(Athletics + Reflex) ÷ 2⌋ |
-| 🧠 Stress | 3 + Presence |
-| 🛡️ Dodge Defense | 10 + Agility + Reflex |
-| ⚔️ Parry Defense | 10 + Physique + Melee |
-
 Traits update automatically whenever stats change.
 
----
+| Trait | Formula |
+|---|---|
+| Health | 5 + Physique + floor(Resilience / 2) |
+| Movement | 3 + floor((Athletics + Reflex) / 2) |
+| Stress | 3 + Presence |
+| Dodge Defense | 10 + Agility + Reflex |
+| Parry Defense | 10 + Physique + Melee |
+| AP | Current AP / Max AP, default 4 / 4 |
 
 ## Commands
 
@@ -43,101 +50,51 @@ Traits update automatically whenever stats change.
 
 | Command | Description |
 |---|---|
-| `/character create name:<name>` | Create a new character |
-| `/character list` | List all your characters |
+| `/character create name:<name>` | Create and save a new character |
+| `/character list` | List all your saved characters |
 | `/character switch id:<id>` | Set a character as active |
-| `/character delete id:<id>` | Delete a character |
+| `/character delete id:<id>` | Delete one of your characters |
 | `/profile` | View your active character sheet |
 | `/profile user:@someone` | View another player's active character |
-| `/roll skill:<skill>` | Roll a skill check (d30 + skill + ability) |
-| `/roll skill:<skill> label:<text>` | Roll with a custom label |
-| `/rollraw dice:<notation>` | Free-form dice roll (e.g. `2d6+3`, `d20`) |
+| `/roll skill skill:<skill>` | Roll d20 + parent ability + skill |
+| `/roll ability ability:<ability>` | Roll d20 + ability |
+| `/rollraw dice:<notation>` | Free-form dice roll, for example `2d6+3` or `d20` |
 | `/history` | View your active character's last 10 rolls |
+| `/ap spend amount:<n>` | Retract or spend current AP |
+| `/ap status` | Show current AP |
+| `/end` | Reset current AP to full max AP |
+| `/advance skill skill:<skill>` | Spend a pending skill level-up |
+| `/advance ability ability:<ability>` | Spend a pending ability level-up |
 
-### Moderator Commands
-*Requires the **Manage Roles** permission*
+### Admin Commands
+
+Requires Manage Roles permission.
 
 | Command | Description |
 |---|---|
-| `/levelup user:@player character_id:<id> stat:<stat>` | Increase a stat by 1 |
-| `/setstat user:@player character_id:<id> stat:<stat> value:<n>` | Set a stat to a specific value (0–99) |
+| `/levelup user:@player character_id:<id> type:skill amount:<n>` | Grant pending skill level-ups for the player to choose |
+| `/levelup user:@player character_id:<id> type:ability amount:<n>` | Grant pending ability level-ups for the player to choose |
+| `/setstat user:@player character_id:<id> stat:<stat> value:<n>` | Set a stat directly |
 
-> 💡 Find a character's ID via `/character list` (the player) or `/profile @player`.
+## Persistence
 
----
+Characters are stored in SQLite at `data/dice.db` by default. The database migration is non-destructive and adds the new AP and pending level-up columns to existing databases.
+
+For hosted deployments, make sure `data/dice.db` is on persistent storage. On Railway, Fly.io, or similar hosts, attach a persistent volume and point your app at it, or keep the `data` directory on the mounted volume.
 
 ## Setup
 
-### 1. Prerequisites
-- [Node.js](https://nodejs.org/) v18+
-- A Discord bot with **Manage Roles** permission scope (for mod commands)
-
-### 2. Create a Discord Application
-
-1. Go to [https://discord.com/developers/applications](https://discord.com/developers/applications)
-2. **New Application** → name it
-3. **Bot** → **Add Bot** → copy the **Token** (= `DISCORD_TOKEN`)
-4. **General Information** → copy **Application ID** (= `CLIENT_ID`)
-5. **Bot → Privileged Gateway Intents**: enable **Server Members Intent**
-
-### 3. Invite the Bot
-
-**OAuth2 → URL Generator**:
-- Scopes: `bot`, `applications.commands`
-- Permissions: `Send Messages`, `Embed Links`, `Use Slash Commands`
-
-### 4. Install & Run
-
 ```bash
 npm install
-
 cp .env.example .env
-# Fill in DISCORD_TOKEN and CLIENT_ID
-
 npm start
 ```
 
-Commands register globally on first start (can take up to 1 hour to propagate).
+Your `.env` file needs:
 
----
-
-## File Structure
-
-```
-discord-dice-bot/
-├── bot.js          # Slash commands, interactions, embeds
-├── diceEngine.js   # d30 skill rolling + free-form notation
-├── database.js     # SQLite: characters, stats, roll history
-├── package.json
-├── .env.example
-└── data/
-    └── dice.db     # Auto-created on first run
+```text
+DISCORD_TOKEN=your_bot_token
+CLIENT_ID=your_application_client_id
 ```
 
----
-
-## Moderator Workflow Example
-
-```
-1. Player: /character create name:Seraphine
-   → Bot: "Character Seraphine created! (ID: 3)"
-
-2. Mod: /setstat user:@player character_id:3 stat:physique value:3
-   → Bot: Physique set to 3. Updated traits shown.
-
-3. Mod: /levelup user:@player character_id:3 stat:athletics
-   → Bot: Athletics leveled up 0 → 1.
-
-4. Player: /roll skill:athletics
-   → Bot: d30 + Athletics (1) + Physique (3) = total shown.
-
-5. Player: /profile
-   → Bot: Full character sheet with all traits.
-```
-
----
-
-## Hosting (24/7 Uptime)
-
-- **[Railway](https://railway.app)** or **[Fly.io](https://fly.io)** — easy Node.js + persistent volumes for SQLite
-- **VPS with PM2**: `pm2 start bot.js --name dice-bot && pm2 save`
+Slash commands register globally when the bot starts. Global command updates can take time to appear in Discord.
