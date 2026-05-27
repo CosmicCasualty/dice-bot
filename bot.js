@@ -28,6 +28,8 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
+const BOT_VERSION = '0.31.0';
+const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
 const ALL_STAT_NAMES = [...ABILITIES, ...ALL_SKILL_NAMES];
@@ -58,9 +60,14 @@ const commands = [
       .addIntegerOption(o => o.setName('id').setDescription('Character ID to delete').setRequired(true))),
 
   new SlashCommandBuilder()
-    .setName('profile')
-    .setDescription('View an active character sheet')
-    .addUserOption(o => o.setName('user').setDescription('View another user active character').setRequired(false)),
+    .setName('select')
+    .setDescription('Select which of your characters is currently active')
+    .addIntegerOption(o => o.setName('id').setDescription('Character ID from /character list').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('sheet')
+    .setDescription('Show your currently selected character sheet'),
+
 
   new SlashCommandBuilder()
     .setName('roll')
@@ -86,16 +93,16 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('history')
-    .setDescription('View your active character last 10 rolls'),
+    .setDescription('View your selected character last 10 rolls'),
 
-  resourceCommand('ap', 'Adjust your active character AP. Use a negative amount to spend AP.'),
-  resourceCommand('hp', 'Adjust your active character health. Use a negative amount to take damage.'),
-  resourceCommand('movement', 'Adjust your active character movement. Use a negative amount to spend movement.'),
-  resourceCommand('stress', 'Adjust your active character stress. Use a negative amount to lose stress.'),
+  resourceCommand('ap', 'Adjust your selected character AP. Use a negative amount to spend AP.'),
+  resourceCommand('hp', 'Adjust your selected character health. Use a negative amount to take damage.'),
+  resourceCommand('movement', 'Adjust your selected character movement. Use a negative amount to spend movement.'),
+  resourceCommand('stress', 'Adjust your selected character stress. Use a negative amount to lose stress.'),
 
   new SlashCommandBuilder()
     .setName('end')
-    .setDescription('End your turn and reset your active character AP and movement to full'),
+    .setDescription('End your turn and reset your selected character AP and movement to full'),
 
   new SlashCommandBuilder()
     .setName('advance')
@@ -139,6 +146,44 @@ function resourceCommand(name, description) {
     .addIntegerOption(o => o.setName('amount').setDescription('Positive restores, negative spends/reduces. Leave empty to check status.').setMinValue(-99).setMaxValue(99).setRequired(false));
 }
 
+
+function patchInteractionFooter(interaction) {
+  if (interaction.__undeadFooterPatched) return;
+  interaction.__undeadFooterPatched = true;
+
+  if (typeof interaction.editReply === 'function') {
+    const originalEditReply = interaction.editReply.bind(interaction);
+    interaction.editReply = payload => originalEditReply(withBotFooter(payload));
+  }
+
+  if (typeof interaction.reply === 'function') {
+    const originalReply = interaction.reply.bind(interaction);
+    interaction.reply = payload => originalReply(withBotFooter(payload));
+  }
+}
+
+function withBotFooter(payload) {
+  if (typeof payload === 'string') return addFooterToText(payload);
+  if (!payload || typeof payload !== 'object') return payload;
+
+  if (payload.content) payload.content = addFooterToText(payload.content);
+  if (Array.isArray(payload.embeds)) {
+    payload.embeds = payload.embeds.map(embed => {
+      if (embed && typeof embed.setFooter === 'function') {
+        embed.setFooter({ text: BOT_FOOTER });
+      }
+      return embed;
+    });
+  }
+
+  return payload;
+}
+
+function addFooterToText(text) {
+  if (!text || text.includes(BOT_FOOTER)) return text;
+  return `${text}\n\n*${BOT_FOOTER}*`;
+}
+
 async function registerCommands() {
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
   try {
@@ -156,6 +201,7 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async interaction => {
+  patchInteractionFooter(interaction);
   if (interaction.isButton()) return handleButton(interaction);
   if (!interaction.isChatInputCommand()) return;
 
@@ -163,7 +209,8 @@ client.on('interactionCreate', async interaction => {
 
   try {
     if (interaction.commandName === 'character') return handleCharacter(interaction);
-    if (interaction.commandName === 'profile') return handleProfile(interaction);
+    if (interaction.commandName === 'select') return handleSelect(interaction);
+    if (interaction.commandName === 'sheet') return handleSheet(interaction);
     if (interaction.commandName === 'roll') return handleRoll(interaction);
     if (interaction.commandName === 'rollraw') return handleRollRaw(interaction);
     if (interaction.commandName === 'history') return handleHistory(interaction);
@@ -184,9 +231,11 @@ async function handleCharacter(interaction) {
   if (sub === 'create') {
     const name = interaction.options.getString('name').trim();
     if (!name || name.length > 50) return interaction.editReply('Character name must be 1 to 50 characters.');
+    const wasFirstCharacter = db.listCharacters(interaction.user.id).length === 0;
     const id = db.createCharacter(interaction.user.id, interaction.user.username, name);
     return interaction.editReply(
       `Character **${name}** created and saved. ID: \`${id}\`. ` +
+      (wasFirstCharacter ? 'This is your first character, so it has been automatically selected as active. ' : `Use \`/select id:${id}\` to make this your active character. `) +
       `New characters start with **${STARTING_ABILITY_LEVELUPS} ability level-ups** and **${STARTING_SKILL_LEVELUPS} skill level-ups**. ` +
       `Starting skill level-ups cannot raise a skill above **${CREATION_SKILL_CAP}**.`
     );
@@ -196,7 +245,7 @@ async function handleCharacter(interaction) {
     const chars = db.listCharacters(interaction.user.id);
     if (!chars.length) return interaction.editReply('You have no characters yet. Use `/character create` to make one.');
     const lines = chars.map(c => {
-      const active = c.active ? 'Active' : 'Inactive';
+      const active = c.active ? 'Selected' : 'Not selected';
       return `${active} | **[${c.id}]** ${c.char_name} | AP ${fmt(c.traits.ap_current, c.traits.ap_max)} | HP ${fmt(c.traits.health_current, c.traits.health_max)} | Skill LU ${c.pending_skill_levelups} | Ability LU ${c.pending_ability_levelups}`;
     }).join('\n');
     const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${interaction.user.username}'s Characters`).setDescription(lines);
@@ -208,7 +257,7 @@ async function handleCharacter(interaction) {
     const ok = db.setActiveCharacter(interaction.user.id, id);
     if (!ok) return interaction.editReply(`No character with ID \`${id}\` found for you.`);
     const char = db.getCharacterById(id);
-    return interaction.editReply(`Switched active character to **${char.char_name}**.`);
+    return interaction.editReply(`Selected **${char.char_name}** as your active character.`);
   }
 
   if (sub === 'delete') {
@@ -220,21 +269,31 @@ async function handleCharacter(interaction) {
   }
 }
 
-async function handleProfile(interaction) {
-  const targetUser = interaction.options.getUser('user') || interaction.user;
-  const char = db.getActiveCharacter(targetUser.id);
-  if (!char) {
-    return interaction.editReply(targetUser.id === interaction.user.id ? 'You have no active character. Use `/character create` first.' : `${targetUser.username} has no active character.`);
-  }
-  return interaction.editReply({ embeds: [characterSheetEmbed(char, targetUser.displayAvatarURL())] });
+async function handleSelect(interaction) {
+  const id = interaction.options.getInteger('id');
+  const ok = db.setActiveCharacter(interaction.user.id, id);
+  if (!ok) return interaction.editReply(`No character with ID \`${id}\` found for you. Use \`/character list\` to see your characters.`);
+  const char = db.getCharacterById(id);
+  return interaction.editReply(`Selected **${char.char_name}** as your active character. Use \`/sheet\` to view them.`);
 }
+
+async function handleSheet(interaction) {
+  const char = db.getActiveCharacter(interaction.user.id);
+  if (!char) {
+    const chars = db.listCharacters(interaction.user.id);
+    if (!chars.length) return interaction.editReply('You do not have any characters yet. Use `/character create` first.');
+    return interaction.editReply('You do not have a selected character. Use `/select id:<character id>` first. You can find character IDs with `/character list`.');
+  }
+  return interaction.editReply({ embeds: [characterSheetEmbed(char, interaction.user.displayAvatarURL())] });
+}
+
 
 async function handleRoll(interaction) {
   const sub = interaction.options.getSubcommand();
   const label = interaction.options.getString('label');
   const mode = interaction.options.getString('mode') || 'normal';
   const char = db.getActiveCharacter(interaction.user.id);
-  if (!char) return interaction.editReply('You have no active character. Use `/character create` first.');
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
 
   if (sub === 'skill') {
     const skill = interaction.options.getString('skill');
@@ -264,7 +323,7 @@ async function handleRollRaw(interaction) {
 
 async function handleHistory(interaction) {
   const char = db.getActiveCharacter(interaction.user.id);
-  if (!char) return interaction.editReply('You have no active character.');
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
   const history = db.getRollHistory(char.id);
   if (!history.length) return interaction.editReply('No rolls yet for this character.');
   const lines = history.map((r, i) => {
@@ -277,7 +336,7 @@ async function handleHistory(interaction) {
 
 async function handleResource(interaction, commandName) {
   const char = db.getActiveCharacter(interaction.user.id);
-  if (!char) return interaction.editReply('You have no active character.');
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
 
   const resource = commandName === 'hp' ? 'health' : commandName;
   const amount = interaction.options.getInteger('amount');
@@ -305,7 +364,7 @@ async function handleResource(interaction, commandName) {
 
 async function handleEnd(interaction) {
   const char = db.getActiveCharacter(interaction.user.id);
-  if (!char) return interaction.editReply('You have no active character.');
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
   const result = db.resetTurnResources(char.id);
   if (!result.success) return interaction.editReply(result.error);
   return interaction.editReply(`**${result.char.char_name}** resets to full AP and movement: AP **${fmt(result.char.traits.ap_current, result.char.traits.ap_max)}**, Movement **${fmt(result.char.traits.movement_current, result.char.traits.movement_max)}**.`);
@@ -313,7 +372,7 @@ async function handleEnd(interaction) {
 
 async function handleAdvance(interaction) {
   const char = db.getActiveCharacter(interaction.user.id);
-  if (!char) return interaction.editReply('You have no active character.');
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
   const sub = interaction.options.getSubcommand();
   const stat = sub === 'skill' ? interaction.options.getString('skill') : interaction.options.getString('ability');
   const result = db.spendLevelUp(char.id, sub, stat);
@@ -558,7 +617,7 @@ function modeSuffix(mode) {
 }
 
 function shouldBeEphemeral(cmd) {
-  return ['character', 'history', 'ap', 'hp', 'movement', 'stress', 'advance'].includes(cmd);
+  return ['character', 'select', 'history', 'ap', 'hp', 'movement', 'stress', 'advance'].includes(cmd);
 }
 
 function isModerator(member) {

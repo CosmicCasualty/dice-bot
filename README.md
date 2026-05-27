@@ -1,5 +1,7 @@
 # Discord RPG Dice Bot
 
+Current bot version: **0.31.0**. This value is set in `bot.js` as `BOT_VERSION`, and displayed on every bot output through `BOT_FOOTER`.
+
 A Discord bot for a custom d20 tabletop RPG system with saved characters, ability and skill rolls, current/max resources, character sheets, morale checks, and admin-granted player-chosen level-ups.
 
 ## Main Rules
@@ -76,6 +78,10 @@ When Stress hits 0, the bot automatically rolls Morale as `d20 + Presence + Mora
 
 If Freeze is rolled, the bot sets current AP and movement to 0.
 
+### Active Character Selection
+
+Each player can select one current character. The first character a player creates is selected automatically. After that, use `/select id:<id>` to change the current selected character. `/sheet` always displays the selected character. If no character is selected, the bot tells the player to select one first.
+
 ## Commands
 
 ### Player Commands
@@ -84,14 +90,14 @@ If Freeze is rolled, the bot sets current AP and movement to 0.
 |---|---|
 | `/character create name:<name>` | Create and save a new character |
 | `/character list` | List all your saved characters |
-| `/character switch id:<id>` | Set a character as active |
+| `/select id:<id>` | Select your current active character |
+| `/character switch id:<id>` | Legacy alias for selecting a character |
 | `/character delete id:<id>` | Delete one of your characters |
-| `/profile` | View your active character sheet |
-| `/profile user:@someone` | View another player's active character |
+| `/sheet` | View your selected character sheet |
 | `/roll skill skill:<skill> mode:<normal/adv/dis>` | Roll d20 + parent ability + skill |
 | `/roll ability ability:<ability> mode:<normal/adv/dis>` | Roll d20 + ability |
 | `/rollraw dice:<notation>` | Free-form dice roll, for example `2d6+3` or `d20` |
-| `/history` | View your active character's last 10 rolls |
+| `/history` | View your selected character's last 10 rolls |
 | `/ap amount:<n>` | Adjust AP. Use negative numbers to spend AP, for example `-2` |
 | `/hp amount:<n>` | Adjust health. Use negative numbers to take damage |
 | `/movement amount:<n>` | Adjust movement. Use negative numbers to spend movement |
