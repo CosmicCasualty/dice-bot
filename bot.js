@@ -30,7 +30,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.32.0';
+const BOT_VERSION = '0.32.1';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -192,10 +192,8 @@ function patchInteractionFooter(interaction) {
 }
 
 function withBotFooter(payload) {
-  if (typeof payload === 'string') return addFooterToText(payload);
   if (!payload || typeof payload !== 'object') return payload;
   if (payload.ephemeral) payload.ephemeral = false;
-  if (payload.content) payload.content = addFooterToText(payload.content);
   if (Array.isArray(payload.embeds)) {
     payload.embeds = payload.embeds.map(embed => {
       if (embed && typeof embed.setFooter === 'function') embed.setFooter({ text: BOT_FOOTER });
@@ -203,11 +201,6 @@ function withBotFooter(payload) {
     });
   }
   return payload;
-}
-
-function addFooterToText(text) {
-  if (!text || text.includes(BOT_FOOTER)) return text;
-  return `${text}\n\n*${BOT_FOOTER}*`;
 }
 
 async function registerCommands() {
