@@ -1,18 +1,20 @@
 class DiceEngine {
-  rollSkill(skill, skillMod, ability, abilityMod, mode = 'normal') {
+  rollSkill(skill, skillMod, ability, abilityMod, mode = 'normal', flatModifier = 0, notes = []) {
     const d20 = this._rollD20(mode);
-    const modifier = skillMod + abilityMod;
+    const modifier = skillMod + abilityMod + flatModifier;
     const total = d20.result + modifier;
-    const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)} + ${this._cap(skill)} ${this._signed(skillMod)} = ${total}`;
-    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode };
+    const extra = flatModifier === 0 ? '' : ` + Conditions ${this._signed(flatModifier)}`;
+    const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)} + ${this._cap(skill)} ${this._signed(skillMod)}${extra} = ${total}`;
+    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode, notes };
   }
 
-  rollAbility(ability, abilityMod, mode = 'normal') {
+  rollAbility(ability, abilityMod, mode = 'normal', flatModifier = 0, notes = []) {
     const d20 = this._rollD20(mode);
-    const modifier = abilityMod;
+    const modifier = abilityMod + flatModifier;
     const total = d20.result + modifier;
-    const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)} = ${total}`;
-    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode };
+    const extra = flatModifier === 0 ? '' : ` + Conditions ${this._signed(flatModifier)}`;
+    const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)}${extra} = ${total}`;
+    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode, notes };
   }
 
   roll(notation) {
@@ -85,7 +87,7 @@ class DiceEngine {
   }
 
   _cap(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
+    return String(str).split(' ').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
   }
 }
 

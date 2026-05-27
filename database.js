@@ -21,16 +21,147 @@ const STARTING_SKILL_LEVELUPS = 5;
 const CREATION_SKILL_CAP = 3;
 const LEVELUP_CAP = 10;
 
+const CONDITION_DEFINITIONS = {
+  stunned: {
+    name: 'Stunned',
+    description: 'Disadvantage on all rolls. Cannot take Reactions.',
+  },
+  bleeding: {
+    name: 'Bleeding',
+    description: 'Take 1 damage at the end of your turn.',
+  },
+  prone: {
+    name: 'Prone',
+    description: '+2 to Aiming rolls. Gain the Slowed condition.',
+    grants: ['slowed'],
+  },
+  blinded: {
+    name: 'Blinded',
+    description: 'Disadvantage on Melee, Aiming, and Awareness rolls. Cannot use Reactions. You have no vision and automatically fail any check that relies solely on sight.',
+  },
+  'blurred vision': {
+    name: 'Blurred Vision',
+    description: '-3 to Melee, Aiming, and Awareness rolls.',
+  },
+  weakened: {
+    name: 'Weakened',
+    description: 'Disadvantage on any Physique rolls.',
+  },
+  slowed: {
+    name: 'Slowed',
+    description: 'Movement halved.',
+  },
+  grappled: {
+    name: 'Grappled',
+    description: 'Cannot use movement. You are Stunned.',
+    grants: ['stunned'],
+  },
+  grappling: {
+    name: 'Grappling',
+    description: 'You are Slowed. Grappled Target counts as an equipped item. Advantage on Physique-based rolls against the Grappled Target.',
+    grants: ['slowed'],
+  },
+  hidden: {
+    name: 'Hidden',
+    description: 'Advantage on attack rolls. Detection is 10 + Agility + Stealth. Lost by using Movement or Attacking.',
+  },
+  horrified: {
+    name: 'Horrified',
+    description: 'You cannot willingly move closer to the source of the Condition. While you can see the source, you have the Stunned Condition.',
+  },
+  'aflame weak': {
+    name: 'Aflame: Weak',
+    description: 'Take 1 Fire Damage at the end of your turn. Extinguish DC: 12.',
+    fireDamage: 1,
+    extinguishDc: 12,
+  },
+  'aflame medium': {
+    name: 'Aflame: Medium',
+    description: 'Take 2 Fire Damage at the end of your turn. Extinguish DC: 15.',
+    fireDamage: 2,
+    extinguishDc: 15,
+  },
+  'aflame heavy': {
+    name: 'Aflame: Heavy',
+    description: 'Take 3 Fire Damage at the end of your turn. Extinguish DC: 18.',
+    fireDamage: 3,
+    extinguishDc: 18,
+  },
+};
+
+const INJURY_DEFINITIONS = {
+  concussion: {
+    name: 'Concussion',
+    treatment: '3 days of rest.',
+    description: 'Your AP maximum is reduced by 1. You gain the Stunned condition.',
+    apPenalty: 1,
+    grants: ['stunned'],
+  },
+  'broken ribs': {
+    name: 'Broken Ribs',
+    treatment: '7 days of rest.',
+    description: 'Your AP maximum is reduced by 1. You gain the Weakened condition.',
+    apPenalty: 1,
+    grants: ['weakened'],
+  },
+  'broken arm': {
+    name: 'Broken Arm',
+    treatment: 'Splint or cast for 7 days.',
+    description: 'When the arm is used in an action, any rolls are at disadvantage. Roll Resilience. Result under 10: Take 1 damage.',
+    grants: [],
+  },
+  'broken leg': {
+    name: 'Broken Leg',
+    treatment: 'Splint or cast for 7 days.',
+    description: 'You gain the Slowed condition. When you take the Move Action, take 1 damage.',
+    grants: ['slowed'],
+  },
+  'deep wound': {
+    name: 'Deep Wound',
+    treatment: 'Stitch up wound, DC 14 Medicine.',
+    description: 'You gain the Bleeding condition.',
+    grants: ['bleeding'],
+  },
+  'lost eye': {
+    name: 'Lost Eye',
+    treatment: 'None.',
+    description: 'You gain the Blurred Vision condition.',
+    grants: ['blurred vision'],
+  },
+  'lost eyes': {
+    name: 'Lost Eyes',
+    treatment: 'None.',
+    description: 'You gain the Blinded condition.',
+    grants: ['blinded'],
+  },
+  'punctured lung': {
+    name: 'Punctured Lung',
+    treatment: '3 days of rest.',
+    description: 'Your AP maximum is reduced by 2. You gain the Slowed condition.',
+    apPenalty: 2,
+    grants: ['slowed'],
+  },
+};
+
+function normalizeName(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function derivedMaxes(s) {
+function apPenaltyFromInjuries(injuries = []) {
+  return injuries.reduce((sum, injury) => sum + (INJURY_DEFINITIONS[injury.name]?.apPenalty || 0), 0);
+}
+
+function derivedMaxes(s, injuries = []) {
+  const apPenalty = apPenaltyFromInjuries(injuries);
   return {
     health_max: 5 + s.physique + Math.floor(s.resilience / 2),
     movement_max: 3 + Math.floor((s.athletics + s.reflex) / 2),
     stress_max: 3 + s.presence,
-    ap_max: s.ap_max ?? DEFAULT_MAX_AP,
+    ap_max: Math.max(0, (s.ap_max ?? DEFAULT_MAX_AP) - apPenalty),
   };
 }
 
@@ -39,8 +170,8 @@ function currentOrMax(current, max) {
   return clamp(current, 0, max);
 }
 
-function calcTraits(s) {
-  const maxes = derivedMaxes(s);
+function calcTraits(s, injuries = []) {
+  const maxes = derivedMaxes(s, injuries);
   return {
     health_current: currentOrMax(s.health_current, maxes.health_max),
     health_max: maxes.health_max,
@@ -53,6 +184,7 @@ function calcTraits(s) {
     dodge_defense: 10 + s.agility + s.reflex,
     parry_defense: 10 + s.physique + s.melee,
     base_defense: 10 + s.resilience,
+    detection: 10 + s.agility + s.stealth,
   };
 }
 
@@ -120,6 +252,26 @@ class DB {
         rolled_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (char_id) REFERENCES characters(id) ON DELETE CASCADE
       );
+
+      CREATE TABLE IF NOT EXISTS character_conditions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        char_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        rounds INTEGER,
+        source TEXT DEFAULT 'manual',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (char_id) REFERENCES characters(id) ON DELETE CASCADE,
+        UNIQUE(char_id, name, source)
+      );
+
+      CREATE TABLE IF NOT EXISTS character_injuries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        char_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (char_id) REFERENCES characters(id) ON DELETE CASCADE,
+        UNIQUE(char_id, name)
+      );
     `);
 
     this._addColumnIfMissing('characters', 'ap_current', 'INTEGER DEFAULT 4');
@@ -145,9 +297,33 @@ class DB {
     }
   }
 
+  _conditionsForChar(charId) {
+    return this.db.prepare('SELECT * FROM character_conditions WHERE char_id = ? ORDER BY name ASC, source ASC').all(charId).map(c => ({
+      ...c,
+      displayName: CONDITION_DEFINITIONS[c.name]?.name || capitalize(c.name),
+      definition: CONDITION_DEFINITIONS[c.name] || null,
+      persistent: c.rounds === null || c.rounds === undefined,
+    }));
+  }
+
+  _injuriesForChar(charId) {
+    return this.db.prepare('SELECT * FROM character_injuries WHERE char_id = ? ORDER BY name ASC').all(charId).map(i => ({
+      ...i,
+      displayName: INJURY_DEFINITIONS[i.name]?.name || capitalize(i.name),
+      definition: INJURY_DEFINITIONS[i.name] || null,
+    }));
+  }
+
   _withTraits(row) {
     if (!row) return null;
-    return { ...row, traits: calcTraits(row) };
+    const injuries = this._injuriesForChar(row.id);
+    const conditions = this._conditionsForChar(row.id);
+    const traits = calcTraits(row, injuries);
+    if (conditions.some(c => c.name === 'slowed')) {
+      traits.movement_max = Math.floor(traits.movement_max / 2);
+      traits.movement_current = clamp(traits.movement_current, 0, traits.movement_max);
+    }
+    return { ...row, injuries, conditions, traits };
   }
 
   createCharacter(userId, username, charName) {
@@ -201,6 +377,8 @@ class DB {
     const char = this.getCharacterById(charId, userId);
     if (!char) return false;
     this.db.prepare('DELETE FROM roll_history WHERE char_id = ?').run(charId);
+    this.db.prepare('DELETE FROM character_conditions WHERE char_id = ?').run(charId);
+    this.db.prepare('DELETE FROM character_injuries WHERE char_id = ?').run(charId);
     this.db.prepare('DELETE FROM characters WHERE id = ?').run(charId);
     if (char.active) {
       const next = this.db.prepare('SELECT id FROM characters WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(userId);
@@ -275,7 +453,8 @@ class DB {
     if (!char) return { success: false, error: `No character with ID ${charId}.` };
     this.db.prepare(`UPDATE characters SET "${stat}" = ? WHERE id = ?`).run(value, charId);
     const updated = this.getCharacterById(charId);
-    return { success: true, stat, old: char[stat], new: updated[stat], charName: char.char_name, traits: updated.traits };
+    this._syncCurrentResources(charId);
+    return { success: true, stat, old: char[stat], new: updated[stat], charName: char.char_name, traits: this.getCharacterById(charId).traits };
   }
 
   adjustResource(charId, resource, amount) {
@@ -283,6 +462,7 @@ class DB {
     if (!Number.isInteger(amount) || amount < -99 || amount > 99 || amount === 0) return { success: false, error: 'Amount must be a non-zero integer from -99 to 99.' };
     const char = this.getCharacterById(charId);
     if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    if (resource === 'movement' && this.hasCondition(char, 'grappled') && amount < 0) return { success: false, error: 'This character is Grappled and cannot use movement.' };
 
     const currentKey = `${resource}_current`;
     const maxKey = `${resource}_max`;
@@ -290,6 +470,12 @@ class DB {
     const maxValue = char.traits[maxKey];
     const newValue = clamp(oldValue + amount, 0, maxValue);
     this.db.prepare(`UPDATE characters SET ${currentKey} = ? WHERE id = ?`).run(newValue, charId);
+
+    let removedHidden = false;
+    if (resource === 'movement' && amount < 0 && this.hasCondition(char, 'hidden')) {
+      this.removeCondition(charId, 'hidden');
+      removedHidden = true;
+    }
 
     const updated = this.getCharacterById(charId);
     return {
@@ -301,23 +487,166 @@ class DB {
       newValue,
       maxValue,
       hitZero: oldValue > 0 && newValue === 0,
+      removedHidden,
     };
   }
 
   resetTurnResources(charId) {
     const char = this.getCharacterById(charId);
     if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    const endEffects = this.applyEndTurnEffects(charId);
+    const afterEffects = this.getCharacterById(charId);
     this.db.prepare('UPDATE characters SET ap_current = ?, movement_current = ? WHERE id = ?')
-      .run(char.traits.ap_max, char.traits.movement_max, charId);
-    return { success: true, char: this.getCharacterById(charId) };
+      .run(afterEffects.traits.ap_max, afterEffects.traits.movement_max, charId);
+    const conditionTick = this.tickConditions(charId);
+    return { success: true, char: this.getCharacterById(charId), endEffects, conditionTick };
   }
 
+  applyEndTurnEffects(charId) {
+    const char = this.getCharacterById(charId);
+    if (!char) return { damage: 0, lines: [] };
+    let damage = 0;
+    const lines = [];
+    if (this.hasCondition(char, 'bleeding')) {
+      damage += 1;
+      lines.push('Bleeding deals 1 damage.');
+    }
+    for (const condition of char.conditions) {
+      const def = CONDITION_DEFINITIONS[condition.name];
+      if (def?.fireDamage) {
+        damage += def.fireDamage;
+        lines.push(`${def.name} deals ${def.fireDamage} Fire Damage. Extinguish DC: ${def.extinguishDc}.`);
+      }
+    }
+    if (damage > 0) {
+      const current = char.traits.health_current;
+      const next = clamp(current - damage, 0, char.traits.health_max);
+      this.db.prepare('UPDATE characters SET health_current = ? WHERE id = ?').run(next, charId);
+      lines.push(`HP changes from ${current}/${char.traits.health_max} to ${next}/${char.traits.health_max}.`);
+    }
+    return { damage, lines };
+  }
+
+  tickConditions(charId) {
+    const expiring = this.db.prepare('SELECT id, name, rounds FROM character_conditions WHERE char_id = ? AND source = ? AND rounds IS NOT NULL AND rounds <= 1')
+      .all(charId, 'manual');
+    const ticking = this.db.prepare('SELECT id, name, rounds FROM character_conditions WHERE char_id = ? AND source = ? AND rounds IS NOT NULL AND rounds > 1')
+      .all(charId, 'manual');
+    this.db.prepare('DELETE FROM character_conditions WHERE char_id = ? AND source = ? AND rounds IS NOT NULL AND rounds <= 1').run(charId, 'manual');
+    this.db.prepare('UPDATE character_conditions SET rounds = rounds - 1 WHERE char_id = ? AND source = ? AND rounds IS NOT NULL AND rounds > 1').run(charId, 'manual');
+    return { expired: expiring, reduced: ticking };
+  }
 
   setTurnResourcesToZero(charId) {
     const char = this.getCharacterById(charId);
     if (!char) return { success: false, error: `No character with ID ${charId}.` };
     this.db.prepare('UPDATE characters SET ap_current = 0, movement_current = 0 WHERE id = ?').run(charId);
     return { success: true, char: this.getCharacterById(charId) };
+  }
+
+  addCondition(charId, name, rounds = 1, source = 'manual') {
+    const key = normalizeName(name);
+    if (!CONDITION_DEFINITIONS[key]) return { success: false, error: `Unknown condition: ${name}.` };
+    if (source === 'manual' && (!Number.isInteger(rounds) || rounds < 1 || rounds > 99)) return { success: false, error: 'Time must be from 1 to 99 rounds.' };
+    const char = this.getCharacterById(charId);
+    if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    const storedRounds = source === 'manual' ? rounds : null;
+    this.db.prepare(`
+      INSERT INTO character_conditions (char_id, name, rounds, source)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(char_id, name, source) DO UPDATE SET rounds = excluded.rounds
+    `).run(charId, key, storedRounds, source);
+    const grants = [];
+    for (const granted of (CONDITION_DEFINITIONS[key].grants || [])) {
+      this.addCondition(charId, granted, storedRounds || 1, source);
+      grants.push(CONDITION_DEFINITIONS[granted].name);
+    }
+    return { success: true, condition: CONDITION_DEFINITIONS[key], rounds: storedRounds, grants, char: this.getCharacterById(charId) };
+  }
+
+  removeCondition(charId, name, source = null) {
+    const key = normalizeName(name);
+    if (!CONDITION_DEFINITIONS[key]) return { success: false, error: `Unknown condition: ${name}.` };
+    const char = this.getCharacterById(charId);
+    if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    const info = this.db.prepare('SELECT * FROM character_conditions WHERE char_id = ? AND name = ?').all(charId, key);
+    if (!info.length) return { success: false, error: `${char.char_name} does not have ${CONDITION_DEFINITIONS[key].name}.` };
+    if (source) this.db.prepare('DELETE FROM character_conditions WHERE char_id = ? AND name = ? AND source = ?').run(charId, key, source);
+    else this.db.prepare('DELETE FROM character_conditions WHERE char_id = ? AND name = ?').run(charId, key);
+    return { success: true, condition: CONDITION_DEFINITIONS[key], char: this.getCharacterById(charId) };
+  }
+
+  addInjury(charId, name) {
+    const key = normalizeName(name);
+    const injury = INJURY_DEFINITIONS[key];
+    if (!injury) return { success: false, error: `Unknown injury: ${name}.` };
+    const char = this.getCharacterById(charId);
+    if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    this.db.prepare('INSERT OR IGNORE INTO character_injuries (char_id, name) VALUES (?, ?)').run(charId, key);
+    for (const condition of (injury.grants || [])) this.addCondition(charId, condition, 1, `injury:${key}`);
+    this._syncCurrentResources(charId);
+    return { success: true, injury, char: this.getCharacterById(charId) };
+  }
+
+  removeInjury(charId, name) {
+    const key = normalizeName(name);
+    const injury = INJURY_DEFINITIONS[key];
+    if (!injury) return { success: false, error: `Unknown injury: ${name}.` };
+    const char = this.getCharacterById(charId);
+    if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    const existing = this.db.prepare('SELECT * FROM character_injuries WHERE char_id = ? AND name = ?').get(charId, key);
+    if (!existing) return { success: false, error: `${char.char_name} does not have ${injury.name}.` };
+    this.db.prepare('DELETE FROM character_injuries WHERE char_id = ? AND name = ?').run(charId, key);
+    this.db.prepare('DELETE FROM character_conditions WHERE char_id = ? AND source = ?').run(charId, `injury:${key}`);
+    this._syncCurrentResources(charId);
+    return { success: true, injury, char: this.getCharacterById(charId) };
+  }
+
+  _syncCurrentResources(charId) {
+    const char = this.getCharacterById(charId);
+    if (!char) return;
+    this.db.prepare('UPDATE characters SET ap_current = ?, health_current = ?, movement_current = ?, stress_current = ? WHERE id = ?')
+      .run(char.traits.ap_current, char.traits.health_current, char.traits.movement_current, char.traits.stress_current, charId);
+  }
+
+  hasCondition(charOrId, name) {
+    const key = normalizeName(name);
+    const char = typeof charOrId === 'object' ? charOrId : this.getCharacterById(charOrId);
+    if (!char) return false;
+    return char.conditions.some(c => c.name === key);
+  }
+
+  rollModifiers(char, type, stat, parentAbility = null, requestedMode = 'normal') {
+    let mode = requestedMode;
+    let flat = 0;
+    const notes = [];
+    const has = name => this.hasCondition(char, name);
+    const forceDis = reason => {
+      if (mode === 'adv') notes.push(`${reason} changes advantage to normal.`);
+      else if (mode !== 'dis') notes.push(`${reason} applies disadvantage.`);
+      mode = mode === 'adv' ? 'normal' : 'dis';
+    };
+    const forceAdv = reason => {
+      if (mode === 'dis') notes.push(`${reason} changes disadvantage to normal.`);
+      else if (mode !== 'adv') notes.push(`${reason} applies advantage.`);
+      mode = mode === 'dis' ? 'normal' : 'adv';
+    };
+
+    if (has('stunned')) forceDis('Stunned');
+    if (has('blinded') && type === 'skill' && ['melee', 'aiming', 'awareness'].includes(stat)) forceDis('Blinded');
+    if (has('weakened') && (stat === 'physique' || parentAbility === 'physique')) forceDis('Weakened');
+    if (has('grappling') && (stat === 'physique' || parentAbility === 'physique')) forceAdv('Grappling');
+    if (has('hidden') && type === 'skill' && ['melee', 'aiming'].includes(stat)) forceAdv('Hidden');
+    if (has('prone') && stat === 'aiming') {
+      flat += 2;
+      notes.push('Prone grants +2 to Aiming.');
+    }
+    if (has('blurred vision') && type === 'skill' && ['melee', 'aiming', 'awareness'].includes(stat)) {
+      flat -= 3;
+      notes.push('Blurred Vision applies -3.');
+    }
+
+    return { mode, flat, notes };
   }
 
   recordRoll(charId, stat, ability, diceResult, modifier, total) {
@@ -348,7 +677,7 @@ class DB {
 }
 
 function capitalize(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  return String(s).split(' ').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
 
 module.exports = DB;
@@ -361,3 +690,6 @@ module.exports.STARTING_ABILITY_LEVELUPS = STARTING_ABILITY_LEVELUPS;
 module.exports.STARTING_SKILL_LEVELUPS = STARTING_SKILL_LEVELUPS;
 module.exports.CREATION_SKILL_CAP = CREATION_SKILL_CAP;
 module.exports.LEVELUP_CAP = LEVELUP_CAP;
+module.exports.CONDITION_DEFINITIONS = CONDITION_DEFINITIONS;
+module.exports.INJURY_DEFINITIONS = INJURY_DEFINITIONS;
+module.exports.normalizeName = normalizeName;

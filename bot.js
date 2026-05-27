@@ -23,18 +23,22 @@ const {
   STARTING_SKILL_LEVELUPS,
   CREATION_SKILL_CAP,
   LEVELUP_CAP,
+  CONDITION_DEFINITIONS,
+  INJURY_DEFINITIONS,
 } = require('./database');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.31.0';
+const BOT_VERSION = '0.32.0';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
 const ALL_STAT_NAMES = [...ABILITIES, ...ALL_SKILL_NAMES];
 const abilityChoices = ABILITIES.map(a => ({ name: capitalize(a), value: a }));
 const skillChoices = ALL_SKILL_NAMES.map(s => ({ name: capitalize(s), value: s }));
+const conditionChoices = Object.entries(CONDITION_DEFINITIONS).map(([value, def]) => ({ name: def.name, value }));
+const injuryChoices = Object.entries(INJURY_DEFINITIONS).map(([value, def]) => ({ name: def.name, value }));
 const rollModeChoices = [
   { name: 'Normal', value: 'normal' },
   { name: 'Advantage', value: 'adv' },
@@ -68,7 +72,6 @@ const commands = [
     .setName('sheet')
     .setDescription('Show your currently selected character sheet'),
 
-
   new SlashCommandBuilder()
     .setName('roll')
     .setDescription('Roll d20 checks')
@@ -101,8 +104,35 @@ const commands = [
   resourceCommand('stress', 'Adjust your selected character stress. Use a negative amount to lose stress.'),
 
   new SlashCommandBuilder()
+    .setName('condition')
+    .setDescription('Add, remove, or list conditions for your selected character')
+    .addSubcommand(s => s
+      .setName('add')
+      .setDescription('Add a condition')
+      .addStringOption(o => o.setName('name').setDescription('Condition name').setRequired(true).addChoices(...conditionChoices))
+      .addIntegerOption(o => o.setName('time').setDescription('Rounds. Defaults to 1.').setMinValue(1).setMaxValue(99).setRequired(false)))
+    .addSubcommand(s => s
+      .setName('remove')
+      .setDescription('Remove a condition')
+      .addStringOption(o => o.setName('name').setDescription('Condition name').setRequired(true).addChoices(...conditionChoices)))
+    .addSubcommand(s => s.setName('list').setDescription('List active conditions')),
+
+  new SlashCommandBuilder()
+    .setName('injury')
+    .setDescription('Add, remove, or list injuries for your selected character')
+    .addSubcommand(s => s
+      .setName('add')
+      .setDescription('Add an injury')
+      .addStringOption(o => o.setName('name').setDescription('Injury name').setRequired(true).addChoices(...injuryChoices)))
+    .addSubcommand(s => s
+      .setName('remove')
+      .setDescription('Remove an injury')
+      .addStringOption(o => o.setName('name').setDescription('Injury name').setRequired(true).addChoices(...injuryChoices)))
+    .addSubcommand(s => s.setName('list').setDescription('List active injuries')),
+
+  new SlashCommandBuilder()
     .setName('end')
-    .setDescription('End your turn and reset your selected character AP and movement to full'),
+    .setDescription('End your turn: apply end-turn effects, reset AP/movement, tick manual conditions'),
 
   new SlashCommandBuilder()
     .setName('advance')
@@ -146,7 +176,6 @@ function resourceCommand(name, description) {
     .addIntegerOption(o => o.setName('amount').setDescription('Positive restores, negative spends/reduces. Leave empty to check status.').setMinValue(-99).setMaxValue(99).setRequired(false));
 }
 
-
 function patchInteractionFooter(interaction) {
   if (interaction.__undeadFooterPatched) return;
   interaction.__undeadFooterPatched = true;
@@ -165,17 +194,14 @@ function patchInteractionFooter(interaction) {
 function withBotFooter(payload) {
   if (typeof payload === 'string') return addFooterToText(payload);
   if (!payload || typeof payload !== 'object') return payload;
-
+  if (payload.ephemeral) payload.ephemeral = false;
   if (payload.content) payload.content = addFooterToText(payload.content);
   if (Array.isArray(payload.embeds)) {
     payload.embeds = payload.embeds.map(embed => {
-      if (embed && typeof embed.setFooter === 'function') {
-        embed.setFooter({ text: BOT_FOOTER });
-      }
+      if (embed && typeof embed.setFooter === 'function') embed.setFooter({ text: BOT_FOOTER });
       return embed;
     });
   }
-
   return payload;
 }
 
@@ -205,7 +231,7 @@ client.on('interactionCreate', async interaction => {
   if (interaction.isButton()) return handleButton(interaction);
   if (!interaction.isChatInputCommand()) return;
 
-  await interaction.deferReply({ ephemeral: shouldBeEphemeral(interaction.commandName) });
+  await interaction.deferReply({ ephemeral: false });
 
   try {
     if (interaction.commandName === 'character') return handleCharacter(interaction);
@@ -215,6 +241,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'rollraw') return handleRollRaw(interaction);
     if (interaction.commandName === 'history') return handleHistory(interaction);
     if (['ap', 'hp', 'movement', 'stress'].includes(interaction.commandName)) return handleResource(interaction, interaction.commandName);
+    if (interaction.commandName === 'condition') return handleCondition(interaction);
+    if (interaction.commandName === 'injury') return handleInjury(interaction);
     if (interaction.commandName === 'end') return handleEnd(interaction);
     if (interaction.commandName === 'advance') return handleAdvance(interaction);
     if (interaction.commandName === 'levelup') return handleLevelUp(interaction);
@@ -246,7 +274,10 @@ async function handleCharacter(interaction) {
     if (!chars.length) return interaction.editReply('You have no characters yet. Use `/character create` to make one.');
     const lines = chars.map(c => {
       const active = c.active ? 'Selected' : 'Not selected';
-      return `${active} | **[${c.id}]** ${c.char_name} | AP ${fmt(c.traits.ap_current, c.traits.ap_max)} | HP ${fmt(c.traits.health_current, c.traits.health_max)} | Skill LU ${c.pending_skill_levelups} | Ability LU ${c.pending_ability_levelups}`;
+      const parts = [`${active} | **[${c.id}]** ${c.char_name}`, `AP ${fmt(c.traits.ap_current, c.traits.ap_max)}`, `HP ${fmt(c.traits.health_current, c.traits.health_max)}`];
+      const pending = pendingLevelupsString(c);
+      if (pending) parts.push(pending.replace(/\n/g, ' | '));
+      return parts.join(' | ');
     }).join('\n');
     const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${interaction.user.username}'s Characters`).setDescription(lines);
     return interaction.editReply({ embeds: [embed] });
@@ -287,27 +318,29 @@ async function handleSheet(interaction) {
   return interaction.editReply({ embeds: [characterSheetEmbed(char, interaction.user.displayAvatarURL())] });
 }
 
-
 async function handleRoll(interaction) {
   const sub = interaction.options.getSubcommand();
   const label = interaction.options.getString('label');
-  const mode = interaction.options.getString('mode') || 'normal';
+  const requestedMode = interaction.options.getString('mode') || 'normal';
   const char = db.getActiveCharacter(interaction.user.id);
   if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
 
   if (sub === 'skill') {
     const skill = interaction.options.getString('skill');
     const ability = db.getParentAbility(skill);
-    const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], mode);
+    const modifiers = db.rollModifiers(char, 'skill', skill, ability, requestedMode);
+    const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, skill, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    return interaction.editReply({ embeds: [skillRollEmbed(char, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, mode)] });
+    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) db.removeCondition(char.id, 'hidden');
+    return interaction.editReply({ embeds: [skillRollEmbed(char, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
   if (sub === 'ability') {
     const ability = interaction.options.getString('ability');
-    const rollData = dice.rollAbility(ability, char[ability], mode);
+    const modifiers = db.rollModifiers(char, 'ability', ability, null, requestedMode);
+    const rollData = dice.rollAbility(ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, null, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    return interaction.editReply({ embeds: [abilityRollEmbed(char, ability, rollData, label)], components: [rerollAbilityRow(char.id, ability, mode)] });
+    return interaction.editReply({ embeds: [abilityRollEmbed(char, ability, rollData, label)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
   }
 }
 
@@ -330,7 +363,7 @@ async function handleHistory(interaction) {
     const label = r.skill ? `${capitalize(r.skill)} (${capitalize(r.ability)})` : `${capitalize(r.ability)} ability`;
     return `**${i + 1}.** ${label} -> **${r.total}**`;
   }).join('\n');
-  const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${char.char_name}'s Recent Rolls`).setDescription(lines).setFooter({ text: 'Last 10 rolls' });
+  const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${char.char_name}'s Recent Rolls`).setDescription(lines);
   return interaction.editReply({ embeds: [embed] });
 }
 
@@ -340,9 +373,7 @@ async function handleResource(interaction, commandName) {
 
   const resource = commandName === 'hp' ? 'health' : commandName;
   const amount = interaction.options.getInteger('amount');
-  if (amount === null) {
-    return interaction.editReply(`**${char.char_name}** has **${formatResource(char, resource)} ${resourceLabel(resource)}**.`);
-  }
+  if (amount === null) return interaction.editReply(`**${char.char_name}** has **${formatResource(char, resource)} ${resourceLabel(resource)}**.`);
   if (amount === 0) return interaction.editReply('Use a non-zero amount. Positive restores, negative spends or reduces.');
 
   const result = db.adjustResource(char.id, resource, amount);
@@ -350,6 +381,7 @@ async function handleResource(interaction, commandName) {
 
   const verb = amount < 0 ? 'loses/spends' : 'recovers';
   let message = `**${result.char.char_name}** ${verb} **${Math.abs(amount)} ${resourceLabel(resource)}** and now has **${formatResource(result.char, resource)} ${resourceLabel(resource)}**.`;
+  if (result.removedHidden) message += '\nHidden was removed because they used Movement.';
 
   if (resource === 'stress' && result.hitZero) {
     const moraleRoll = dice.rollSkill('morale', result.char.morale, 'presence', result.char.presence);
@@ -362,12 +394,60 @@ async function handleResource(interaction, commandName) {
   return interaction.editReply(message);
 }
 
+async function handleCondition(interaction) {
+  const char = db.getActiveCharacter(interaction.user.id);
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
+  const sub = interaction.options.getSubcommand();
+  if (sub === 'list') return interaction.editReply({ embeds: [conditionsEmbed(char)] });
+  const name = interaction.options.getString('name');
+  if (sub === 'add') {
+    const time = interaction.options.getInteger('time') || 1;
+    const result = db.addCondition(char.id, name, time);
+    if (!result.success) return interaction.editReply(result.error);
+    let msg = `**${result.char.char_name}** gains **${result.condition.name}** for **${time} round${time === 1 ? '' : 's'}**.`;
+    if (result.grants.length) msg += `\nAlso gained: ${result.grants.map(x => `**${x}**`).join(', ')}.`;
+    msg += `\n${result.condition.description}`;
+    return interaction.editReply(msg);
+  }
+  if (sub === 'remove') {
+    const result = db.removeCondition(char.id, name);
+    if (!result.success) return interaction.editReply(result.error);
+    return interaction.editReply(`**${result.char.char_name}** no longer has **${result.condition.name}**.`);
+  }
+}
+
+async function handleInjury(interaction) {
+  const char = db.getActiveCharacter(interaction.user.id);
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
+  const sub = interaction.options.getSubcommand();
+  if (sub === 'list') return interaction.editReply({ embeds: [injuriesEmbed(char)] });
+  const name = interaction.options.getString('name');
+  if (sub === 'add') {
+    const result = db.addInjury(char.id, name);
+    if (!result.success) return interaction.editReply(result.error);
+    let msg = `**${result.char.char_name}** gains injury: **${result.injury.name}**.\nTreatment: ${result.injury.treatment}\n${result.injury.description}`;
+    if (result.injury.grants?.length) msg += `\nGranted conditions are persistent and do not tick down with \`/end\`.`;
+    return interaction.editReply(msg);
+  }
+  if (sub === 'remove') {
+    const result = db.removeInjury(char.id, name);
+    if (!result.success) return interaction.editReply(result.error);
+    return interaction.editReply(`**${result.char.char_name}** removed injury: **${result.injury.name}**. Any conditions granted by that injury were removed.`);
+  }
+}
+
 async function handleEnd(interaction) {
   const char = db.getActiveCharacter(interaction.user.id);
   if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
   const result = db.resetTurnResources(char.id);
   if (!result.success) return interaction.editReply(result.error);
-  return interaction.editReply(`**${result.char.char_name}** resets to full AP and movement: AP **${fmt(result.char.traits.ap_current, result.char.traits.ap_max)}**, Movement **${fmt(result.char.traits.movement_current, result.char.traits.movement_max)}**.`);
+  const lines = [`**${result.char.char_name}** ends their turn.`];
+  if (result.endEffects.lines.length) lines.push('', '**End-turn effects**', ...result.endEffects.lines);
+  lines.push('', `AP reset to **${fmt(result.char.traits.ap_current, result.char.traits.ap_max)}**.`);
+  lines.push(`Movement reset to **${fmt(result.char.traits.movement_current, result.char.traits.movement_max)}**.`);
+  if (result.conditionTick.reduced.length) lines.push('', `Manual conditions reduced by 1 round: ${result.conditionTick.reduced.map(c => CONDITION_DEFINITIONS[c.name]?.name || c.name).join(', ')}.`);
+  if (result.conditionTick.expired.length) lines.push(`Expired manual conditions: ${result.conditionTick.expired.map(c => CONDITION_DEFINITIONS[c.name]?.name || c.name).join(', ')}.`);
+  return interaction.editReply(lines.join('\n'));
 }
 
 async function handleAdvance(interaction) {
@@ -384,9 +464,10 @@ async function handleAdvance(interaction) {
     .addFields(
       { name: 'Old Value', value: `${result.old}`, inline: true },
       { name: 'New Value', value: `${result.new}`, inline: true },
-      { name: 'Pending Level-Ups', value: pendingLevelupsString(result), inline: false },
       { name: 'Updated Traits', value: traitsString(result.traits), inline: false },
     );
+  const pending = pendingLevelupsString(result);
+  if (pending) embed.addFields({ name: 'Pending Level-Ups', value: pending, inline: false });
   return interaction.editReply({ embeds: [embed] });
 }
 
@@ -428,30 +509,33 @@ async function handleSetStat(interaction) {
 
 async function handleButton(interaction) {
   if (interaction.customId.startsWith('reroll_skill_')) {
-    const [charIdRaw, skill, modeRaw] = interaction.customId.replace('reroll_skill_', '').split('|');
-    const mode = modeRaw || 'normal';
+    const [charIdRaw, skill, requestedModeRaw] = interaction.customId.replace('reroll_skill_', '').split('|');
+    const requestedMode = requestedModeRaw || 'normal';
     const char = db.getCharacterById(parseInt(charIdRaw, 10), interaction.user.id);
-    if (!char) return interaction.reply({ content: 'Character not found or not yours.', ephemeral: true });
+    if (!char) return interaction.reply({ content: 'Character not found or not yours.', ephemeral: false });
     const ability = db.getParentAbility(skill);
-    const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], mode);
+    const modifiers = db.rollModifiers(char, 'skill', skill, ability, requestedMode);
+    const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, skill, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    return interaction.reply({ embeds: [skillRollEmbed(char, skill, ability, rollData)], components: [rerollSkillRow(char.id, skill, mode)] });
+    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) db.removeCondition(char.id, 'hidden');
+    return interaction.reply({ embeds: [skillRollEmbed(char, skill, ability, rollData)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('reroll_ability_')) {
-    const [charIdRaw, ability, modeRaw] = interaction.customId.replace('reroll_ability_', '').split('|');
-    const mode = modeRaw || 'normal';
+    const [charIdRaw, ability, requestedModeRaw] = interaction.customId.replace('reroll_ability_', '').split('|');
+    const requestedMode = requestedModeRaw || 'normal';
     const char = db.getCharacterById(parseInt(charIdRaw, 10), interaction.user.id);
-    if (!char) return interaction.reply({ content: 'Character not found or not yours.', ephemeral: true });
-    const rollData = dice.rollAbility(ability, char[ability], mode);
+    if (!char) return interaction.reply({ content: 'Character not found or not yours.', ephemeral: false });
+    const modifiers = db.rollModifiers(char, 'ability', ability, null, requestedMode);
+    const rollData = dice.rollAbility(ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, null, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    return interaction.reply({ embeds: [abilityRollEmbed(char, ability, rollData)], components: [rerollAbilityRow(char.id, ability, mode)] });
+    return interaction.reply({ embeds: [abilityRollEmbed(char, ability, rollData)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('rerollraw_')) {
     const notation = interaction.customId.replace('rerollraw_', '');
     const result = dice.roll(notation);
-    if (!result.success) return interaction.reply({ content: result.error, ephemeral: true });
+    if (!result.success) return interaction.reply({ content: result.error, ephemeral: false });
     const embed = rawRollEmbed(interaction.user.username, notation, result, 'Re-Roll');
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rerollraw_${notation}`).setLabel('Roll Again').setStyle(ButtonStyle.Secondary));
     return interaction.reply({ embeds: [embed], components: [row] });
@@ -470,12 +554,13 @@ function characterSheetEmbed(char, avatarUrl = null) {
     .setDescription(`Character of <@${char.user_id}> | ID: \`${char.id}\``)
     .addFields(
       { name: 'Resources', value: resourcesString(char), inline: true },
-      { name: 'Pending Level-Ups', value: pendingLevelupsString(char), inline: true },
       { name: 'Derived Traits', value: traitsString(char.traits), inline: false },
+      { name: 'Conditions', value: conditionsString(char), inline: false },
+      { name: 'Injuries', value: injuriesString(char), inline: false },
       { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
-    )
-    .setFooter({ text: `Created ${new Date(char.created_at).toLocaleDateString()}` });
-
+    );
+  const pending = pendingLevelupsString(char);
+  if (pending) embed.addFields({ name: 'Pending Level-Ups', value: pending, inline: false });
   if (avatarUrl) embed.setThumbnail(avatarUrl);
   return embed;
 }
@@ -487,8 +572,8 @@ function skillRollEmbed(char, skill, ability, rollData, label = null) {
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
-    )
-    .setFooter({ text: `Character: ${char.char_name}` });
+    );
+  if (rollData.notes?.length) embed.addFields({ name: 'Condition Effects', value: rollData.notes.join('\n'), inline: false });
   addCritText(embed, rollData);
   return embed;
 }
@@ -500,8 +585,8 @@ function abilityRollEmbed(char, ability, rollData, label = null) {
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
-    )
-    .setFooter({ text: `Character: ${char.char_name}` });
+    );
+  if (rollData.notes?.length) embed.addFields({ name: 'Condition Effects', value: rollData.notes.join('\n'), inline: false });
   addCritText(embed, rollData);
   return embed;
 }
@@ -517,6 +602,20 @@ function rawRollEmbed(username, notation, result, title) {
     );
   addCritText(embed, result);
   return embed;
+}
+
+function conditionsEmbed(char) {
+  return new EmbedBuilder()
+    .setColor(0xE3311D)
+    .setTitle(`${char.char_name}'s Conditions`)
+    .setDescription(conditionsString(char, true));
+}
+
+function injuriesEmbed(char) {
+  return new EmbedBuilder()
+    .setColor(0xE3311D)
+    .setTitle(`${char.char_name}'s Injuries`)
+    .setDescription(injuriesString(char, true));
 }
 
 function baseRollEmbed(result) {
@@ -560,15 +659,38 @@ function traitsString(t) {
     `Base Defense: **${t.base_defense}**`,
     `Dodge Defense: **${t.dodge_defense}**`,
     `Parry Defense: **${t.parry_defense}**`,
+    `Detection: **${t.detection}**`,
   ].join('\n');
 }
 
+function conditionsString(char, full = false) {
+  if (!char.conditions.length) return 'None';
+  return char.conditions.map(c => {
+    const duration = c.persistent ? 'persistent' : `${c.rounds} round${c.rounds === 1 ? '' : 's'}`;
+    const source = c.source?.startsWith('injury:') ? ' from injury' : '';
+    const base = `**${c.displayName}** (${duration}${source})`;
+    return full && c.definition ? `${base}\n${c.definition.description}` : base;
+  }).join('\n');
+}
+
+function injuriesString(char, full = false) {
+  if (!char.injuries.length) return 'None';
+  return char.injuries.map(i => {
+    const base = `**${i.displayName}**`;
+    if (!full || !i.definition) return base;
+    return `${base}\nTreatment: ${i.definition.treatment}\n${i.definition.description}`;
+  }).join('\n');
+}
+
 function pendingLevelupsString(x) {
-  return [
-    `Skill: **${x.pendingSkill ?? x.pending_skill_levelups}**`,
-    `Ability: **${x.pendingAbility ?? x.pending_ability_levelups}**`,
-    `Starting skill LU left: **${x.creationSkillRemaining ?? x.creation_skill_levelups_remaining ?? 0}**`,
-  ].join('\n');
+  const skill = x.pendingSkill ?? x.pending_skill_levelups ?? 0;
+  const ability = x.pendingAbility ?? x.pending_ability_levelups ?? 0;
+  const creation = x.creationSkillRemaining ?? x.creation_skill_levelups_remaining ?? 0;
+  const lines = [];
+  if (skill > 0) lines.push(`Skill: **${skill}**`);
+  if (ability > 0) lines.push(`Ability: **${ability}**`);
+  if (creation > 0) lines.push(`Starting skill cap left: **${creation}**`);
+  return lines.join('\n');
 }
 
 function moraleMessage(char, rollData) {
@@ -616,16 +738,12 @@ function modeSuffix(mode) {
   return '';
 }
 
-function shouldBeEphemeral(cmd) {
-  return ['character', 'select', 'history', 'ap', 'hp', 'movement', 'stress', 'advance'].includes(cmd);
-}
-
 function isModerator(member) {
   return Boolean(member && member.permissions.has(PermissionFlagsBits.ManageRoles));
 }
 
 function capitalize(s) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+  return String(s).split(' ').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
 
 client.login(process.env.DISCORD_TOKEN);
