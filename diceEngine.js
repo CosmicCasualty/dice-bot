@@ -1,18 +1,18 @@
 class DiceEngine {
-  rollSkill(skill, skillMod, ability, abilityMod) {
-    const diceResult = this._d20();
+  rollSkill(skill, skillMod, ability, abilityMod, mode = 'normal') {
+    const d20 = this._rollD20(mode);
     const modifier = skillMod + abilityMod;
-    const total = diceResult + modifier;
-    const breakdown = `[d20: **${diceResult}**] + ${this._cap(ability)} ${abilityMod} + ${this._cap(skill)} ${skillMod}`;
-    return { diceResult, modifier, total, isCrit: diceResult === 20, isFumble: diceResult === 1, breakdown };
+    const total = d20.result + modifier;
+    const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)} + ${this._cap(skill)} ${this._signed(skillMod)} = ${total}`;
+    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode };
   }
 
-  rollAbility(ability, abilityMod) {
-    const diceResult = this._d20();
+  rollAbility(ability, abilityMod, mode = 'normal') {
+    const d20 = this._rollD20(mode);
     const modifier = abilityMod;
-    const total = diceResult + modifier;
-    const breakdown = `[d20: **${diceResult}**] + ${this._cap(ability)} ${abilityMod}`;
-    return { diceResult, modifier, total, isCrit: diceResult === 20, isFumble: diceResult === 1, breakdown };
+    const total = d20.result + modifier;
+    const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)} = ${total}`;
+    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode };
   }
 
   roll(notation) {
@@ -32,20 +32,9 @@ class DiceEngine {
       const min = parsed.count + parsed.modifier;
       const max = parsed.count * parsed.sides + parsed.modifier;
       const modText = parsed.modifier === 0 ? '' : parsed.modifier > 0 ? ` + ${parsed.modifier}` : ` - ${Math.abs(parsed.modifier)}`;
-      const breakdown = `[${rolls.join(', ')}]${modText}`;
+      const breakdown = `[${rolls.join(', ')}]${modText} = ${total}`;
 
-      return {
-        success: true,
-        total,
-        rolls,
-        kept,
-        breakdown,
-        min,
-        max,
-        modifier: parsed.modifier,
-        isCrit: diceSum === parsed.count * parsed.sides,
-        isFumble: diceSum === parsed.count,
-      };
+      return { success: true, total, rolls, kept, breakdown, min, max, modifier: parsed.modifier, isCrit: diceSum === parsed.count * parsed.sides, isFumble: diceSum === parsed.count };
     } catch (e) {
       return { success: false, error: e.message };
     }
@@ -53,6 +42,23 @@ class DiceEngine {
 
   validate(notation) {
     return this._parse(notation.trim().toLowerCase().replace('d%', 'd100')) ? { success: true } : { success: false };
+  }
+
+  _rollD20(mode) {
+    if (mode === 'adv' || mode === 'dis') {
+      const rolls = [this._d20(), this._d20()];
+      const result = mode === 'adv' ? Math.max(...rolls) : Math.min(...rolls);
+      return { mode, rolls, result };
+    }
+    const roll = this._d20();
+    return { mode: 'normal', rolls: [roll], result: roll };
+  }
+
+  _d20Text(d20) {
+    if (d20.result === null) d20.result = d20.rolls[0];
+    if (d20.mode === 'adv') return `d20 adv [${d20.rolls.join(', ')}] -> ${d20.result}`;
+    if (d20.mode === 'dis') return `d20 dis [${d20.rolls.join(', ')}] -> ${d20.result}`;
+    return `d20 ${d20.result}`;
   }
 
   _d20() {
@@ -72,6 +78,10 @@ class DiceEngine {
     if (sides < 2 || sides > 1000) return null;
     if (keepNum !== null && keepNum >= count) return null;
     return { count, sides, modifier, keepHighest: keepType === 'kh' ? keepNum : null, keepLowest: keepType === 'kl' ? keepNum : null };
+  }
+
+  _signed(n) {
+    return n >= 0 ? `+${n}` : `${n}`;
   }
 
   _cap(str) {
