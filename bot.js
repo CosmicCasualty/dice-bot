@@ -31,7 +31,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.4.2';
+const BOT_VERSION = '0.4.3';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -142,14 +142,11 @@ const commands = [
   new SlashCommandBuilder()
     .setName('advance')
     .setDescription('Spend a pending level-up granted by an admin or character creation')
-    .addSubcommand(s => s
-      .setName('skill')
-      .setDescription('Spend one pending skill level-up')
-      .addStringOption(o => o.setName('skill').setDescription('Skill to increase').setRequired(true).addChoices(...skillChoices)))
-    .addSubcommand(s => s
-      .setName('ability')
-      .setDescription('Spend one pending ability level-up')
-      .addStringOption(o => o.setName('ability').setDescription('Ability to increase').setRequired(true).addChoices(...abilityChoices))),
+    .addStringOption(o => o
+      .setName('stat')
+      .setDescription('Ability or skill to increase')
+      .setRequired(true)
+      .addChoices(...rollChoices)),
 
   new SlashCommandBuilder()
     .setName('levelup')
@@ -521,9 +518,10 @@ async function handleEnd(interaction) {
 async function handleAdvance(interaction) {
   const char = db.getActiveCharacter(interaction.user.id);
   if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
-  const sub = interaction.options.getSubcommand();
-  const stat = sub === 'skill' ? interaction.options.getString('skill') : interaction.options.getString('ability');
-  const result = db.spendLevelUp(char.id, sub, stat);
+  const selected = interaction.options.getString('stat');
+  const [type, stat] = selected.split(':');
+  if (!['ability', 'skill'].includes(type) || !stat) return interaction.editReply('Choose an ability or skill to advance.');
+  const result = db.spendLevelUp(char.id, type, stat);
   if (!result.success) return interaction.editReply(result.error);
   const embed = new EmbedBuilder()
     .setColor(0x22c55e)
@@ -550,7 +548,7 @@ async function handleLevelUp(interaction) {
   if (!char || char.user_id !== targetUser.id) return interaction.editReply(`Character ID \`${charId}\` does not belong to ${targetUser.username}.`);
   const result = db.grantLevelUp(charId, type, amount);
   if (!result.success) return interaction.editReply(result.error);
-  return interaction.editReply(`<@${targetUser.id}> received **${amount} ${type} level-up${amount === 1 ? '' : 's'}** for **${result.charName}**. They can spend it with \`/advance ${type}\`. Level-ups can raise stats up to **${LEVELUP_CAP}**.`);
+  return interaction.editReply(`<@${targetUser.id}> received **${amount} ${type} level-up${amount === 1 ? '' : 's'}** for **${result.charName}**. They can spend it with \`/advance stat:<ability-or-skill>\`. Level-ups can raise stats up to **${LEVELUP_CAP}**.`);
 }
 
 async function handleSetStat(interaction) {

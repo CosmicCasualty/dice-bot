@@ -3,7 +3,7 @@
 
 1. Create your character with `/character create name:<name>`.
 2. Use `/character sheet` or `/sheet` to view your character sheet.
-3. Spend your starting level-ups with `/advance ability` and `/advance skill`.
+3. Spend your starting level-ups with `/advance stat:<ability-or-skill>`.
 4. Roll checks with `/roll`.
 
 New characters start with:
@@ -178,14 +178,16 @@ Lists active injuries on your selected character.
 
 ## Level-up commands
 
-### `/advance ability ability:<ability>`
+### `/advance stat:<ability-or-skill>`
 
-Spends one pending ability level-up.
+Spends one pending ability or skill level-up. Choose the ability or skill from the single `stat` option, similar to `/roll`.
 
+Examples:
 
-### `/advance skill skill:<skill>`
-
-Spends one pending skill level-up.
+```text
+/advance stat:Physique
+/advance stat:Melee
+```
 
 
 ## Admin commands
