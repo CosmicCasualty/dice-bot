@@ -25,18 +25,23 @@ const {
   LEVELUP_CAP,
   CONDITION_DEFINITIONS,
   INJURY_DEFINITIONS,
+  DEFAULT_CHARACTER_IMAGE_URL,
 } = require('./database');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.32.1';
+const BOT_VERSION = '0.4.2';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
 const ALL_STAT_NAMES = [...ABILITIES, ...ALL_SKILL_NAMES];
 const abilityChoices = ABILITIES.map(a => ({ name: capitalize(a), value: a }));
 const skillChoices = ALL_SKILL_NAMES.map(s => ({ name: capitalize(s), value: s }));
+const rollChoices = [
+  ...ABILITIES.map(a => ({ name: `${capitalize(a)} (Ability)`, value: `ability:${a}` })),
+  ...ALL_SKILLS.map(({ skill, ability }) => ({ name: `${capitalize(skill)} (${capitalize(ability)} Skill)`, value: `skill:${skill}` })),
+];
 const conditionChoices = Object.entries(CONDITION_DEFINITIONS).map(([value, def]) => ({ name: def.name, value }));
 const injuryChoices = Object.entries(INJURY_DEFINITIONS).map(([value, def]) => ({ name: def.name, value }));
 const rollModeChoices = [
@@ -54,6 +59,15 @@ const commands = [
       .setDescription('Create a new character')
       .addStringOption(o => o.setName('name').setDescription('Your character name').setRequired(true)))
     .addSubcommand(s => s.setName('list').setDescription('List all your characters'))
+    .addSubcommand(s => s.setName('sheet').setDescription('Show your currently selected character sheet'))
+    .addSubcommand(s => s
+      .setName('image')
+      .setDescription('Set your selected character image')
+      .addStringOption(o => o.setName('link').setDescription('Direct image link for your character').setRequired(true)))
+    .addSubcommand(s => s
+      .setName('rename')
+      .setDescription('Rename your selected character')
+      .addStringOption(o => o.setName('name').setDescription('New character name').setRequired(true)))
     .addSubcommand(s => s
       .setName('switch')
       .setDescription('Switch your active character')
@@ -75,18 +89,9 @@ const commands = [
   new SlashCommandBuilder()
     .setName('roll')
     .setDescription('Roll d20 checks')
-    .addSubcommand(s => s
-      .setName('skill')
-      .setDescription('Roll d20 + parent ability + skill')
-      .addStringOption(o => o.setName('skill').setDescription('Skill to roll').setRequired(true).addChoices(...skillChoices))
-      .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices))
-      .addStringOption(o => o.setName('label').setDescription('Optional label').setRequired(false)))
-    .addSubcommand(s => s
-      .setName('ability')
-      .setDescription('Roll d20 + ability')
-      .addStringOption(o => o.setName('ability').setDescription('Ability to roll').setRequired(true).addChoices(...abilityChoices))
-      .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices))
-      .addStringOption(o => o.setName('label').setDescription('Optional label').setRequired(false))),
+    .addStringOption(o => o.setName('stat').setDescription('Ability or skill to roll').setRequired(true).addChoices(...rollChoices))
+    .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices))
+    .addStringOption(o => o.setName('label').setDescription('Optional label').setRequired(false)),
 
   new SlashCommandBuilder()
     .setName('rollraw')
@@ -173,7 +178,20 @@ function resourceCommand(name, description) {
   return new SlashCommandBuilder()
     .setName(name)
     .setDescription(description)
-    .addIntegerOption(o => o.setName('amount').setDescription('Positive restores, negative spends/reduces. Leave empty to check status.').setMinValue(-99).setMaxValue(99).setRequired(false));
+    .addIntegerOption(o => o.setName('amount').setDescription('Positive increases, negative reduces.').setMinValue(-99).setMaxValue(99).setRequired(true));
+}
+
+function isValidImageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return ['http:', 'https:'].includes(parsed.protocol);
+  } catch {
+    return false;
+  }
+}
+
+function characterImageUrl(char) {
+  return char?.char_image_url || DEFAULT_CHARACTER_IMAGE_URL;
 }
 
 function patchInteractionFooter(interaction) {
@@ -268,12 +286,33 @@ async function handleCharacter(interaction) {
     const lines = chars.map(c => {
       const active = c.active ? 'Selected' : 'Not selected';
       const parts = [`${active} | **[${c.id}]** ${c.char_name}`, `AP ${fmt(c.traits.ap_current, c.traits.ap_max)}`, `HP ${fmt(c.traits.health_current, c.traits.health_max)}`];
-      const pending = pendingLevelupsString(c);
-      if (pending) parts.push(pending.replace(/\n/g, ' | '));
       return parts.join(' | ');
     }).join('\n');
     const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${interaction.user.username}'s Characters`).setDescription(lines);
     return interaction.editReply({ embeds: [embed] });
+  }
+
+  if (sub === 'sheet') return handleSheet(interaction);
+
+  if (sub === 'image') {
+    const char = db.getActiveCharacter(interaction.user.id);
+    if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
+    const link = interaction.options.getString('link').trim();
+    if (!isValidImageUrl(link) || link.length > 2048) return interaction.editReply('Please provide a valid `http` or `https` image link under 2048 characters.');
+    const result = db.setCharacterImage(interaction.user.id, char.id, link);
+    if (!result.success) return interaction.editReply(result.error);
+    await updatePinnedSheets(char.id);
+    return interaction.editReply(`Updated **${result.char.char_name}** image.`);
+  }
+
+  if (sub === 'rename') {
+    const char = db.getActiveCharacter(interaction.user.id);
+    if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
+    const name = interaction.options.getString('name').trim();
+    const result = db.renameCharacter(interaction.user.id, char.id, name);
+    if (!result.success) return interaction.editReply(result.error);
+    await updatePinnedSheets(char.id);
+    return interaction.editReply(`Renamed **${result.oldName}** to **${result.newName}**.`);
   }
 
   if (sub === 'switch') {
@@ -308,33 +347,59 @@ async function handleSheet(interaction) {
     if (!chars.length) return interaction.editReply('You do not have any characters yet. Use `/character create` first.');
     return interaction.editReply('You do not have a selected character. Use `/select id:<character id>` first. You can find character IDs with `/character list`.');
   }
-  return interaction.editReply({ embeds: [characterSheetEmbed(char, interaction.user.displayAvatarURL())] });
+  const message = await interaction.editReply({ embeds: [characterSheetEmbed(char)] });
+  db.upsertSheetPost(char.id, interaction.guildId, interaction.channelId, message.id);
+  return message;
 }
 
 async function handleRoll(interaction) {
-  const sub = interaction.options.getSubcommand();
+  const sub = interaction.options.getSubcommand(false);
   const label = interaction.options.getString('label');
   const requestedMode = interaction.options.getString('mode') || 'normal';
   const char = db.getActiveCharacter(interaction.user.id);
   if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
 
+  let type = null;
+  let stat = null;
+
   if (sub === 'skill') {
-    const skill = interaction.options.getString('skill');
+    type = 'skill';
+    stat = interaction.options.getString('skill');
+  } else if (sub === 'ability') {
+    type = 'ability';
+    stat = interaction.options.getString('ability');
+  } else {
+    const selected = interaction.options.getString('stat');
+    if (!selected) return interaction.editReply('Choose an ability or skill to roll.');
+    const parts = selected.split(':');
+    type = parts[0];
+    stat = parts[1];
+  }
+
+  if (type === 'skill') {
+    const skill = stat;
     const ability = db.getParentAbility(skill);
     const modifiers = db.rollModifiers(char, 'skill', skill, ability, requestedMode);
     const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, skill, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) db.removeCondition(char.id, 'hidden');
-    return interaction.editReply({ embeds: [skillRollEmbed(char, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
+    let sheetChar = char;
+    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) {
+      const removed = db.removeCondition(char.id, 'hidden');
+      if (removed.success) sheetChar = removed.char;
+      await updatePinnedSheets(char.id);
+    }
+    return interaction.editReply({ embeds: [skillRollEmbed(sheetChar, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
-  if (sub === 'ability') {
-    const ability = interaction.options.getString('ability');
+  if (type === 'ability') {
+    const ability = stat;
     const modifiers = db.rollModifiers(char, 'ability', ability, null, requestedMode);
     const rollData = dice.rollAbility(ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, null, ability, rollData.diceResult, rollData.modifier, rollData.total);
     return interaction.editReply({ embeds: [abilityRollEmbed(char, ability, rollData, label)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
   }
+
+  return interaction.editReply('That roll option was not recognized.');
 }
 
 async function handleRollRaw(interaction) {
@@ -366,24 +431,29 @@ async function handleResource(interaction, commandName) {
 
   const resource = commandName === 'hp' ? 'health' : commandName;
   const amount = interaction.options.getInteger('amount');
-  if (amount === null) return interaction.editReply(`**${char.char_name}** has **${formatResource(char, resource)} ${resourceLabel(resource)}**.`);
-  if (amount === 0) return interaction.editReply('Use a non-zero amount. Positive restores, negative spends or reduces.');
+  if (amount === null) return interaction.editReply(`Use \`/${commandName} amount:<value>\` to change ${resourceLabel(resource)}. Current values are shown on \`/sheet\`.`);
+  if (amount === 0) return interaction.editReply('Use a non-zero amount.');
 
   const result = db.adjustResource(char.id, resource, amount);
   if (!result.success) return interaction.editReply(result.error);
 
-  const verb = amount < 0 ? 'loses/spends' : 'recovers';
+  const verb = resource === 'stress'
+    ? (amount < 0 ? 'reduces' : 'gains')
+    : (amount < 0 ? 'loses/spends' : 'recovers');
   let message = `**${result.char.char_name}** ${verb} **${Math.abs(amount)} ${resourceLabel(resource)}** and now has **${formatResource(result.char, resource)} ${resourceLabel(resource)}**.`;
   if (result.removedHidden) message += '\nHidden was removed because they used Movement.';
 
-  if (resource === 'stress' && result.hitZero) {
+  if (resource === 'stress' && result.hitFull) {
     const moraleRoll = dice.rollSkill('morale', result.char.morale, 'presence', result.char.presence);
     db.recordRoll(result.char.id, 'morale', 'presence', moraleRoll.diceResult, moraleRoll.modifier, moraleRoll.total);
+    db.resetStressToZero(result.char.id);
     if (moraleOutcome(moraleRoll.total) === 'Freeze') db.setTurnResourcesToZero(result.char.id);
     const moraleChar = db.getCharacterById(result.char.id);
+    message = `**${moraleChar.char_name}** ${verb} **${Math.abs(amount)} ${resourceLabel(resource)}**, hit full Stress, and resets to **${formatResource(moraleChar, resource)} ${resourceLabel(resource)}**.`;
     message += `\n\n${moraleMessage(moraleChar, moraleRoll)}`;
   }
 
+  await updatePinnedSheets(result.char.id);
   return interaction.editReply(message);
 }
 
@@ -400,11 +470,13 @@ async function handleCondition(interaction) {
     let msg = `**${result.char.char_name}** gains **${result.condition.name}** for **${time} round${time === 1 ? '' : 's'}**.`;
     if (result.grants.length) msg += `\nAlso gained: ${result.grants.map(x => `**${x}**`).join(', ')}.`;
     msg += `\n${result.condition.description}`;
+    await updatePinnedSheets(result.char.id);
     return interaction.editReply(msg);
   }
   if (sub === 'remove') {
     const result = db.removeCondition(char.id, name);
     if (!result.success) return interaction.editReply(result.error);
+    await updatePinnedSheets(result.char.id);
     return interaction.editReply(`**${result.char.char_name}** no longer has **${result.condition.name}**.`);
   }
 }
@@ -420,11 +492,13 @@ async function handleInjury(interaction) {
     if (!result.success) return interaction.editReply(result.error);
     let msg = `**${result.char.char_name}** gains injury: **${result.injury.name}**.\nTreatment: ${result.injury.treatment}\n${result.injury.description}`;
     if (result.injury.grants?.length) msg += `\nGranted conditions are persistent and do not tick down with \`/end\`.`;
+    await updatePinnedSheets(result.char.id);
     return interaction.editReply(msg);
   }
   if (sub === 'remove') {
     const result = db.removeInjury(char.id, name);
     if (!result.success) return interaction.editReply(result.error);
+    await updatePinnedSheets(result.char.id);
     return interaction.editReply(`**${result.char.char_name}** removed injury: **${result.injury.name}**. Any conditions granted by that injury were removed.`);
   }
 }
@@ -436,10 +510,11 @@ async function handleEnd(interaction) {
   if (!result.success) return interaction.editReply(result.error);
   const lines = [`**${result.char.char_name}** ends their turn.`];
   if (result.endEffects.lines.length) lines.push('', '**End-turn effects**', ...result.endEffects.lines);
+  if (result.conditionTick.reduced.length) lines.push('', `Conditions reduced by 1 round: ${result.conditionTick.reduced.map(c => CONDITION_DEFINITIONS[c.name]?.name || c.name).join(', ')}.`);
+  if (result.conditionTick.expired.length) lines.push(`Expired conditions: ${result.conditionTick.expired.map(c => CONDITION_DEFINITIONS[c.name]?.name || c.name).join(', ')}.`);
   lines.push('', `AP reset to **${fmt(result.char.traits.ap_current, result.char.traits.ap_max)}**.`);
   lines.push(`Movement reset to **${fmt(result.char.traits.movement_current, result.char.traits.movement_max)}**.`);
-  if (result.conditionTick.reduced.length) lines.push('', `Manual conditions reduced by 1 round: ${result.conditionTick.reduced.map(c => CONDITION_DEFINITIONS[c.name]?.name || c.name).join(', ')}.`);
-  if (result.conditionTick.expired.length) lines.push(`Expired manual conditions: ${result.conditionTick.expired.map(c => CONDITION_DEFINITIONS[c.name]?.name || c.name).join(', ')}.`);
+  await updatePinnedSheets(result.char.id);
   return interaction.editReply(lines.join('\n'));
 }
 
@@ -461,6 +536,7 @@ async function handleAdvance(interaction) {
     );
   const pending = pendingLevelupsString(result);
   if (pending) embed.addFields({ name: 'Pending Level-Ups', value: pending, inline: false });
+  await updatePinnedSheets(char.id);
   return interaction.editReply({ embeds: [embed] });
 }
 
@@ -497,7 +573,33 @@ async function handleSetStat(interaction) {
       { name: 'New', value: `${result.new}`, inline: true },
       { name: 'Updated Traits', value: traitsString(result.traits), inline: false },
     );
+  await updatePinnedSheets(charId);
   return interaction.editReply({ embeds: [embed] });
+}
+
+
+async function updatePinnedSheets(charId) {
+  const posts = db.listSheetPosts(charId);
+  if (!posts.length) return;
+
+  const char = db.getCharacterById(charId);
+  if (!char) {
+    db.deleteSheetPostsForCharacter(charId);
+    return;
+  }
+
+  for (const post of posts) {
+    try {
+      const channel = await client.channels.fetch(post.channel_id);
+      if (!channel || !channel.messages) continue;
+      const message = await channel.messages.fetch(post.message_id);
+      if (!message.pinned) continue;
+      await message.edit(withBotFooter({ embeds: [characterSheetEmbed(char)] }));
+    } catch (err) {
+      console.warn(`Could not update stored sheet message ${post.message_id}:`, err.message);
+      db.deleteSheetPost(post.message_id);
+    }
+  }
 }
 
 async function handleButton(interaction) {
@@ -510,8 +612,13 @@ async function handleButton(interaction) {
     const modifiers = db.rollModifiers(char, 'skill', skill, ability, requestedMode);
     const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, skill, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) db.removeCondition(char.id, 'hidden');
-    return interaction.reply({ embeds: [skillRollEmbed(char, skill, ability, rollData)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
+    let sheetChar = char;
+    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) {
+      const removed = db.removeCondition(char.id, 'hidden');
+      if (removed.success) sheetChar = removed.char;
+      await updatePinnedSheets(char.id);
+    }
+    return interaction.reply({ embeds: [skillRollEmbed(sheetChar, skill, ability, rollData)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('reroll_ability_')) {
@@ -535,7 +642,7 @@ async function handleButton(interaction) {
   }
 }
 
-function characterSheetEmbed(char, avatarUrl = null) {
+function characterSheetEmbed(char) {
   const abilityLines = ABILITIES.map(ability => {
     const skills = SKILL_TREE[ability].map(sk => `  ${capitalize(sk)}: **${char[sk]}**`).join('\n');
     return `**${capitalize(ability)}: ${char[ability]}**\n${skills}`;
@@ -547,14 +654,12 @@ function characterSheetEmbed(char, avatarUrl = null) {
     .setDescription(`Character of <@${char.user_id}> | ID: \`${char.id}\``)
     .addFields(
       { name: 'Resources', value: resourcesString(char), inline: true },
-      { name: 'Derived Traits', value: traitsString(char.traits), inline: false },
+      { name: 'Traits', value: derivedTraitsString(char.traits), inline: false },
       { name: 'Conditions', value: conditionsString(char), inline: false },
       { name: 'Injuries', value: injuriesString(char), inline: false },
       { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
     );
-  const pending = pendingLevelupsString(char);
-  if (pending) embed.addFields({ name: 'Pending Level-Ups', value: pending, inline: false });
-  if (avatarUrl) embed.setThumbnail(avatarUrl);
+  embed.setThumbnail(characterImageUrl(char));
   return embed;
 }
 
@@ -656,6 +761,15 @@ function traitsString(t) {
   ].join('\n');
 }
 
+function derivedTraitsString(t) {
+  return [
+    `Base Defense: **${t.base_defense}**`,
+    `Dodge Defense: **${t.dodge_defense}**`,
+    `Parry Defense: **${t.parry_defense}**`,
+    `Detection: **${t.detection}**`,
+  ].join('\n');
+}
+
 function conditionsString(char, full = false) {
   if (!char.conditions.length) return 'None';
   return char.conditions.map(c => {
@@ -689,7 +803,7 @@ function pendingLevelupsString(x) {
 function moraleMessage(char, rollData) {
   const outcome = moraleOutcome(rollData.total);
   return [
-    `**${char.char_name}'s Stress hit 0. They make a Morale roll.**`,
+    `**${char.char_name} has a mental Break. They make a Morale roll, then Stress resets to 0.**`,
     `Total: **${rollData.total}**`,
     `Breakdown: ${rollData.breakdown}`,
     '',

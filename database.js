@@ -20,6 +20,7 @@ const STARTING_ABILITY_LEVELUPS = 3;
 const STARTING_SKILL_LEVELUPS = 5;
 const CREATION_SKILL_CAP = 3;
 const LEVELUP_CAP = 10;
+const DEFAULT_CHARACTER_IMAGE_URL = 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png';
 
 const CONDITION_DEFINITIONS = {
   stunned: {
@@ -170,6 +171,11 @@ function currentOrMax(current, max) {
   return clamp(current, 0, max);
 }
 
+function currentOrZero(current, max) {
+  if (current === null || current === undefined) return 0;
+  return clamp(current, 0, max);
+}
+
 function calcTraits(s, injuries = []) {
   const maxes = derivedMaxes(s, injuries);
   return {
@@ -177,7 +183,7 @@ function calcTraits(s, injuries = []) {
     health_max: maxes.health_max,
     movement_current: currentOrMax(s.movement_current, maxes.movement_max),
     movement_max: maxes.movement_max,
-    stress_current: currentOrMax(s.stress_current, maxes.stress_max),
+    stress_current: currentOrZero(s.stress_current, maxes.stress_max),
     stress_max: maxes.stress_max,
     ap_current: currentOrMax(s.ap_current, maxes.ap_max),
     ap_max: maxes.ap_max,
@@ -207,6 +213,7 @@ class DB {
         user_id TEXT NOT NULL,
         username TEXT NOT NULL,
         char_name TEXT NOT NULL,
+        char_image_url TEXT DEFAULT 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png',
         active INTEGER DEFAULT 0,
         physique INTEGER DEFAULT 0,
         agility INTEGER DEFAULT 0,
@@ -272,6 +279,17 @@ class DB {
         FOREIGN KEY (char_id) REFERENCES characters(id) ON DELETE CASCADE,
         UNIQUE(char_id, name)
       );
+
+      CREATE TABLE IF NOT EXISTS sheet_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        char_id INTEGER NOT NULL,
+        guild_id TEXT,
+        channel_id TEXT NOT NULL,
+        message_id TEXT NOT NULL UNIQUE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (char_id) REFERENCES characters(id) ON DELETE CASCADE
+      );
     `);
 
     this._addColumnIfMissing('characters', 'ap_current', 'INTEGER DEFAULT 4');
@@ -282,12 +300,14 @@ class DB {
     this._addColumnIfMissing('characters', 'pending_skill_levelups', 'INTEGER DEFAULT 0');
     this._addColumnIfMissing('characters', 'pending_ability_levelups', 'INTEGER DEFAULT 0');
     this._addColumnIfMissing('characters', 'creation_skill_levelups_remaining', 'INTEGER DEFAULT 0');
+    this._addColumnIfMissing('characters', 'char_image_url', `TEXT DEFAULT '${DEFAULT_CHARACTER_IMAGE_URL}'`);
 
     this.db.prepare('UPDATE characters SET ap_max = ? WHERE ap_max IS NULL').run(DEFAULT_MAX_AP);
     this.db.prepare('UPDATE characters SET ap_current = ap_max WHERE ap_current IS NULL').run();
     this.db.prepare('UPDATE characters SET pending_skill_levelups = 0 WHERE pending_skill_levelups IS NULL').run();
     this.db.prepare('UPDATE characters SET pending_ability_levelups = 0 WHERE pending_ability_levelups IS NULL').run();
     this.db.prepare('UPDATE characters SET creation_skill_levelups_remaining = 0 WHERE creation_skill_levelups_remaining IS NULL').run();
+    this.db.prepare("UPDATE characters SET char_image_url = ? WHERE char_image_url IS NULL OR TRIM(char_image_url) = ''").run(DEFAULT_CHARACTER_IMAGE_URL);
   }
 
   _addColumnIfMissing(table, column, definition) {
@@ -331,17 +351,19 @@ class DB {
     const isFirst = existing.length === 0;
     const result = this.db.prepare(`
       INSERT INTO characters (
-        user_id, username, char_name, active, ap_current, ap_max,
+        user_id, username, char_name, char_image_url, active, ap_current, ap_max, stress_current,
         pending_skill_levelups, pending_ability_levelups, creation_skill_levelups_remaining
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       userId,
       username,
       charName,
+      DEFAULT_CHARACTER_IMAGE_URL,
       isFirst ? 1 : 0,
       DEFAULT_MAX_AP,
       DEFAULT_MAX_AP,
+      0,
       STARTING_SKILL_LEVELUPS,
       STARTING_ABILITY_LEVELUPS,
       STARTING_SKILL_LEVELUPS,
@@ -379,12 +401,58 @@ class DB {
     this.db.prepare('DELETE FROM roll_history WHERE char_id = ?').run(charId);
     this.db.prepare('DELETE FROM character_conditions WHERE char_id = ?').run(charId);
     this.db.prepare('DELETE FROM character_injuries WHERE char_id = ?').run(charId);
+    this.db.prepare('DELETE FROM sheet_posts WHERE char_id = ?').run(charId);
     this.db.prepare('DELETE FROM characters WHERE id = ?').run(charId);
     if (char.active) {
       const next = this.db.prepare('SELECT id FROM characters WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(userId);
       if (next) this.db.prepare('UPDATE characters SET active = 1 WHERE id = ?').run(next.id);
     }
     return true;
+  }
+
+  renameCharacter(userId, charId, newName) {
+    const name = String(newName || '').trim();
+    if (!name || name.length > 50) return { success: false, error: 'Character name must be 1 to 50 characters.' };
+    const char = this.getCharacterById(charId, userId);
+    if (!char) return { success: false, error: `No character with ID ${charId} found for you.` };
+    this.db.prepare('UPDATE characters SET char_name = ? WHERE id = ?').run(name, charId);
+    return { success: true, oldName: char.char_name, newName: name, char: this.getCharacterById(charId, userId) };
+  }
+
+  setCharacterImage(userId, charId, imageUrl) {
+    const url = String(imageUrl || '').trim() || DEFAULT_CHARACTER_IMAGE_URL;
+    const char = this.getCharacterById(charId, userId);
+    if (!char) return { success: false, error: `No character with ID ${charId} found for you.` };
+    this.db.prepare('UPDATE characters SET char_image_url = ? WHERE id = ?').run(url, charId);
+    return { success: true, imageUrl: url, char: this.getCharacterById(charId, userId) };
+  }
+
+
+  upsertSheetPost(charId, guildId, channelId, messageId) {
+    const char = this.getCharacterById(charId);
+    if (!char || !channelId || !messageId) return false;
+    this.db.prepare(`
+      INSERT INTO sheet_posts (char_id, guild_id, channel_id, message_id)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(message_id) DO UPDATE SET
+        char_id = excluded.char_id,
+        guild_id = excluded.guild_id,
+        channel_id = excluded.channel_id,
+        updated_at = CURRENT_TIMESTAMP
+    `).run(charId, guildId || null, channelId, messageId);
+    return true;
+  }
+
+  listSheetPosts(charId) {
+    return this.db.prepare('SELECT * FROM sheet_posts WHERE char_id = ? ORDER BY updated_at DESC').all(charId);
+  }
+
+  deleteSheetPost(messageId) {
+    this.db.prepare('DELETE FROM sheet_posts WHERE message_id = ?').run(messageId);
+  }
+
+  deleteSheetPostsForCharacter(charId) {
+    this.db.prepare('DELETE FROM sheet_posts WHERE char_id = ?').run(charId);
   }
 
   grantLevelUp(charId, type, amount = 1) {
@@ -487,6 +555,7 @@ class DB {
       newValue,
       maxValue,
       hitZero: oldValue > 0 && newValue === 0,
+      hitFull: resource === 'stress' && oldValue < maxValue && newValue === maxValue,
       removedHidden,
     };
   }
@@ -495,10 +564,10 @@ class DB {
     const char = this.getCharacterById(charId);
     if (!char) return { success: false, error: `No character with ID ${charId}.` };
     const endEffects = this.applyEndTurnEffects(charId);
-    const afterEffects = this.getCharacterById(charId);
-    this.db.prepare('UPDATE characters SET ap_current = ?, movement_current = ? WHERE id = ?')
-      .run(afterEffects.traits.ap_max, afterEffects.traits.movement_max, charId);
     const conditionTick = this.tickConditions(charId);
+    const afterConditions = this.getCharacterById(charId);
+    this.db.prepare('UPDATE characters SET ap_current = ?, movement_current = ? WHERE id = ?')
+      .run(afterConditions.traits.ap_max, afterConditions.traits.movement_max, charId);
     return { success: true, char: this.getCharacterById(charId), endEffects, conditionTick };
   }
 
@@ -541,6 +610,13 @@ class DB {
     const char = this.getCharacterById(charId);
     if (!char) return { success: false, error: `No character with ID ${charId}.` };
     this.db.prepare('UPDATE characters SET ap_current = 0, movement_current = 0 WHERE id = ?').run(charId);
+    return { success: true, char: this.getCharacterById(charId) };
+  }
+
+  resetStressToZero(charId) {
+    const char = this.getCharacterById(charId);
+    if (!char) return { success: false, error: `No character with ID ${charId}.` };
+    this.db.prepare('UPDATE characters SET stress_current = 0 WHERE id = ?').run(charId);
     return { success: true, char: this.getCharacterById(charId) };
   }
 
@@ -690,6 +766,7 @@ module.exports.STARTING_ABILITY_LEVELUPS = STARTING_ABILITY_LEVELUPS;
 module.exports.STARTING_SKILL_LEVELUPS = STARTING_SKILL_LEVELUPS;
 module.exports.CREATION_SKILL_CAP = CREATION_SKILL_CAP;
 module.exports.LEVELUP_CAP = LEVELUP_CAP;
+module.exports.DEFAULT_CHARACTER_IMAGE_URL = DEFAULT_CHARACTER_IMAGE_URL;
 module.exports.CONDITION_DEFINITIONS = CONDITION_DEFINITIONS;
 module.exports.INJURY_DEFINITIONS = INJURY_DEFINITIONS;
 module.exports.normalizeName = normalizeName;
