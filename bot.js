@@ -31,7 +31,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.4.3';
+const BOT_VERSION = '0.4.4';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -790,11 +790,9 @@ function injuriesString(char, full = false) {
 function pendingLevelupsString(x) {
   const skill = x.pendingSkill ?? x.pending_skill_levelups ?? 0;
   const ability = x.pendingAbility ?? x.pending_ability_levelups ?? 0;
-  const creation = x.creationSkillRemaining ?? x.creation_skill_levelups_remaining ?? 0;
   const lines = [];
   if (skill > 0) lines.push(`Skill: **${skill}**`);
   if (ability > 0) lines.push(`Ability: **${ability}**`);
-  if (creation > 0) lines.push(`Starting skill cap left: **${creation}**`);
   return lines.join('\n');
 }
 
