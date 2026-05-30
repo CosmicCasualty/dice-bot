@@ -5,7 +5,7 @@ class DiceEngine {
     const total = d20.result + modifier;
     const extra = flatModifier === 0 ? '' : ` + Conditions ${this._signed(flatModifier)}`;
     const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)} + ${this._cap(skill)} ${this._signed(skillMod)}${extra} = ${total}`;
-    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode, notes };
+    return { diceResult: d20.result, modifier, total, breakdown, mode, notes };
   }
 
   rollAbility(ability, abilityMod, mode = 'normal', flatModifier = 0, notes = []) {
@@ -14,7 +14,7 @@ class DiceEngine {
     const total = d20.result + modifier;
     const extra = flatModifier === 0 ? '' : ` + Conditions ${this._signed(flatModifier)}`;
     const breakdown = `${this._d20Text(d20)} + ${this._cap(ability)} ${this._signed(abilityMod)}${extra} = ${total}`;
-    return { diceResult: d20.result, modifier, total, isCrit: d20.result === 20, isFumble: d20.result === 1, breakdown, mode, notes };
+    return { diceResult: d20.result, modifier, total, breakdown, mode, notes };
   }
 
   roll(notation) {
@@ -36,7 +36,7 @@ class DiceEngine {
       const modText = parsed.modifier === 0 ? '' : parsed.modifier > 0 ? ` + ${parsed.modifier}` : ` - ${Math.abs(parsed.modifier)}`;
       const breakdown = `[${rolls.join(', ')}]${modText} = ${total}`;
 
-      return { success: true, total, rolls, kept, breakdown, min, max, modifier: parsed.modifier, isCrit: diceSum === parsed.count * parsed.sides, isFumble: diceSum === parsed.count };
+      return { success: true, total, rolls, kept, breakdown, min, max, modifier: parsed.modifier};
     } catch (e) {
       return { success: false, error: e.message };
     }

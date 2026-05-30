@@ -31,7 +31,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.4.4';
+const BOT_VERSION = '0.4.5';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -285,7 +285,7 @@ async function handleCharacter(interaction) {
       const parts = [`${active} | **[${c.id}]** ${c.char_name}`, `AP ${fmt(c.traits.ap_current, c.traits.ap_max)}`, `HP ${fmt(c.traits.health_current, c.traits.health_max)}`];
       return parts.join(' | ');
     }).join('\n');
-    const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${interaction.user.username}'s Characters`).setDescription(lines);
+    const embed = new EmbedBuilder().setTitle(`${interaction.user.username}'s Characters`).setDescription(lines);
     return interaction.editReply({ embeds: [embed] });
   }
 
@@ -418,7 +418,7 @@ async function handleHistory(interaction) {
     const label = r.skill ? `${capitalize(r.skill)} (${capitalize(r.ability)})` : `${capitalize(r.ability)} ability`;
     return `**${i + 1}.** ${label} -> **${r.total}**`;
   }).join('\n');
-  const embed = new EmbedBuilder().setColor(0x7c3aed).setTitle(`${char.char_name}'s Recent Rolls`).setDescription(lines);
+  const embed = new EmbedBuilder().setTitle(`${char.char_name}'s Recent Rolls`).setDescription(lines);
   return interaction.editReply({ embeds: [embed] });
 }
 
@@ -524,7 +524,6 @@ async function handleAdvance(interaction) {
   const result = db.spendLevelUp(char.id, type, stat);
   if (!result.success) return interaction.editReply(result.error);
   const embed = new EmbedBuilder()
-    .setColor(0x22c55e)
     .setTitle('Level Up Chosen')
     .setDescription(`**${result.charName}** increased **${capitalize(result.stat)}**.`)
     .addFields(
@@ -562,7 +561,6 @@ async function handleSetStat(interaction) {
   const result = db.setStat(charId, stat, value);
   if (!result.success) return interaction.editReply(result.error);
   const embed = new EmbedBuilder()
-    .setColor(0xf59e0b)
     .setTitle('Stat Updated')
     .setDescription(`<@${targetUser.id}>'s character **${result.charName}**`)
     .addFields(
@@ -647,7 +645,6 @@ function characterSheetEmbed(char) {
   }).join('\n\n');
 
   const embed = new EmbedBuilder()
-    .setColor(0xE3311D)
     .setTitle(char.char_name)
     .setDescription(`Character of <@${char.user_id}> | ID: \`${char.id}\``)
     .addFields(
@@ -670,7 +667,6 @@ function skillRollEmbed(char, skill, ability, rollData, label = null) {
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
     );
   if (rollData.notes?.length) embed.addFields({ name: 'Condition Effects', value: rollData.notes.join('\n'), inline: false });
-  addCritText(embed, rollData);
   return embed;
 }
 
@@ -683,7 +679,6 @@ function abilityRollEmbed(char, ability, rollData, label = null) {
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
     );
   if (rollData.notes?.length) embed.addFields({ name: 'Condition Effects', value: rollData.notes.join('\n'), inline: false });
-  addCritText(embed, rollData);
   return embed;
 }
 
@@ -696,33 +691,24 @@ function rawRollEmbed(username, notation, result, title) {
       { name: 'Breakdown', value: result.breakdown, inline: false },
       { name: 'Range', value: `${result.min} to ${result.max}`, inline: true },
     );
-  addCritText(embed, result);
   return embed;
 }
 
 function conditionsEmbed(char) {
   return new EmbedBuilder()
-    .setColor(0xE3311D)
     .setTitle(`${char.char_name}'s Conditions`)
     .setDescription(conditionsString(char, true));
 }
 
 function injuriesEmbed(char) {
   return new EmbedBuilder()
-    .setColor(0xE3311D)
     .setTitle(`${char.char_name}'s Injuries`)
     .setDescription(injuriesString(char, true));
 }
 
 function baseRollEmbed(result) {
   return new EmbedBuilder()
-    .setColor(result.isCrit ? 0x22c55e : result.isFumble ? 0xef4444 : 0x7c3aed)
     .setTimestamp();
-}
-
-function addCritText(embed, result) {
-  if (result.isCrit) embed.addFields({ name: 'Critical', value: 'Natural 20.' });
-  if (result.isFumble) embed.addFields({ name: 'Fumble', value: 'Natural 1.' });
 }
 
 function rerollSkillRow(charId, skill, mode = 'normal') {
