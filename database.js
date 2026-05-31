@@ -292,6 +292,21 @@ class DB {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (char_id) REFERENCES characters(id) ON DELETE CASCADE
       );
+
+
+      CREATE TABLE IF NOT EXISTS combats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT,
+        channel_id TEXT NOT NULL UNIQUE,
+        tracker_message_id TEXT,
+        status TEXT NOT NULL DEFAULT 'recruiting',
+        round INTEGER NOT NULL DEFAULT 0,
+        current_char_id INTEGER,
+        participants_json TEXT NOT NULL DEFAULT '[]',
+        created_by_user_id TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
 
     this._addColumnIfMissing('characters', 'ap_current', 'INTEGER DEFAULT 4');
@@ -470,6 +485,152 @@ class DB {
 
   deleteSheetPostsForCharacter(charId) {
     this.db.prepare('DELETE FROM sheet_posts WHERE char_id = ?').run(charId);
+  }
+
+
+  createCombat(guildId, channelId, createdByUserId) {
+    const existing = this.getCombat(channelId);
+    if (existing && existing.status !== 'ended') {
+      return { success: false, error: 'There is already an active combat in this channel.', combat: existing };
+    }
+    this.db.prepare('DELETE FROM combats WHERE channel_id = ?').run(channelId);
+    const info = this.db.prepare(`
+      INSERT INTO combats (guild_id, channel_id, status, round, current_char_id, participants_json, created_by_user_id)
+      VALUES (?, ?, 'recruiting', 0, NULL, '[]', ?)
+    `).run(guildId || null, channelId, createdByUserId || null);
+    return { success: true, combat: this.getCombat(channelId), id: info.lastInsertRowid };
+  }
+
+  getCombat(channelId) {
+    const row = this.db.prepare('SELECT * FROM combats WHERE channel_id = ?').get(channelId);
+    return this._hydrateCombat(row);
+  }
+
+  setCombatTrackerMessage(channelId, messageId) {
+    this.db.prepare('UPDATE combats SET tracker_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE channel_id = ?').run(messageId, channelId);
+    return this.getCombat(channelId);
+  }
+
+  addCombatParticipant(channelId, participant) {
+    const combat = this.getCombat(channelId);
+    if (!combat || combat.status === 'ended') return { success: false, error: 'There is no active combat in this channel.' };
+    if (!participant || !participant.char_id) return { success: false, error: 'Missing participant character ID.' };
+    if (combat.participants.some(p => Number(p.char_id) === Number(participant.char_id))) {
+      return { success: false, error: 'That character is already in this combat.', combat };
+    }
+    const participants = this._sortCombatParticipants([...combat.participants, participant]);
+    const currentCharId = combat.current_char_id ? Number(combat.current_char_id) : null;
+    this._saveCombat(channelId, {
+      participants,
+      current_char_id: currentCharId,
+    });
+    return { success: true, combat: this.getCombat(channelId), participant };
+  }
+
+  startCombat(channelId) {
+    const combat = this.getCombat(channelId);
+    if (!combat || combat.status === 'ended') return { success: false, error: 'There is no active combat in this channel.' };
+    const participants = this._sortCombatParticipants(combat.participants);
+    if (!participants.length) return { success: false, error: 'At least one participant must join before combat can start.' };
+    this._saveCombat(channelId, {
+      status: 'active',
+      round: combat.round > 0 ? combat.round : 1,
+      current_char_id: participants[0].char_id,
+      participants,
+    });
+    return { success: true, combat: this.getCombat(channelId) };
+  }
+
+  advanceCombatTurn(channelId, charId) {
+    const combat = this.getCombat(channelId);
+    if (!combat || combat.status !== 'active') return { success: false, error: 'There is no active combat in this channel.' };
+    if (Number(combat.current_char_id) !== Number(charId)) return { success: false, error: 'It is not that character\'s turn.', combat };
+    const participants = this._sortCombatParticipants(combat.participants);
+    if (!participants.length) return { success: false, error: 'Combat has no participants.', combat };
+    const currentIndex = participants.findIndex(p => Number(p.char_id) === Number(charId));
+    if (currentIndex === -1) return { success: false, error: 'Current participant was not found in combat.', combat };
+    const nextIndex = (currentIndex + 1) % participants.length;
+    const nextRound = nextIndex === 0 ? (combat.round || 1) + 1 : combat.round;
+    this._saveCombat(channelId, {
+      participants,
+      round: nextRound,
+      current_char_id: participants[nextIndex].char_id,
+    });
+    return { success: true, combat: this.getCombat(channelId), roundEnded: nextIndex === 0 };
+  }
+
+  removeCombatParticipant(channelId, charId) {
+    const combat = this.getCombat(channelId);
+    if (!combat || combat.status === 'ended') return { success: false, error: 'There is no active combat in this channel.' };
+    const oldParticipants = this._sortCombatParticipants(combat.participants);
+    const removed = oldParticipants.find(p => Number(p.char_id) === Number(charId));
+    if (!removed) return { success: false, error: `Character ID ${charId} is not in this combat.`, combat };
+    const removedIndex = oldParticipants.findIndex(p => Number(p.char_id) === Number(charId));
+    const participants = this._sortCombatParticipants(oldParticipants.filter(p => Number(p.char_id) !== Number(charId)));
+    let currentCharId = combat.current_char_id ? Number(combat.current_char_id) : null;
+    let round = combat.round || 0;
+    let status = combat.status;
+    if (!participants.length) {
+      currentCharId = null;
+      if (status === 'active') round = Math.max(round, 1);
+    } else if (Number(currentCharId) === Number(charId)) {
+      const nextIndex = Math.min(removedIndex, participants.length - 1);
+      currentCharId = participants[nextIndex].char_id;
+    }
+    this._saveCombat(channelId, { participants, current_char_id: currentCharId, round, status });
+    return { success: true, combat: this.getCombat(channelId), removed };
+  }
+
+  endCombat(channelId) {
+    const combat = this.getCombat(channelId);
+    if (!combat || combat.status === 'ended') return { success: false, error: 'There is no active combat in this channel.' };
+    this._saveCombat(channelId, { status: 'ended', current_char_id: null });
+    return { success: true, combat: this.getCombat(channelId) };
+  }
+
+  _hydrateCombat(row) {
+    if (!row) return null;
+    let participants = [];
+    try {
+      participants = JSON.parse(row.participants_json || '[]');
+    } catch {
+      participants = [];
+    }
+    return {
+      ...row,
+      round: Number(row.round || 0),
+      current_char_id: row.current_char_id === null || row.current_char_id === undefined ? null : Number(row.current_char_id),
+      participants: this._sortCombatParticipants(participants),
+    };
+  }
+
+  _saveCombat(channelId, patch) {
+    const combat = this.getCombat(channelId);
+    if (!combat) return false;
+    const next = {
+      status: Object.prototype.hasOwnProperty.call(patch, 'status') ? patch.status : combat.status,
+      round: Object.prototype.hasOwnProperty.call(patch, 'round') ? patch.round : combat.round,
+      current_char_id: Object.prototype.hasOwnProperty.call(patch, 'current_char_id') ? patch.current_char_id : combat.current_char_id,
+      participants: Object.prototype.hasOwnProperty.call(patch, 'participants') ? patch.participants : combat.participants,
+    };
+    this.db.prepare(`
+      UPDATE combats
+      SET status = ?, round = ?, current_char_id = ?, participants_json = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE channel_id = ?
+    `).run(next.status, next.round, next.current_char_id, JSON.stringify(this._sortCombatParticipants(next.participants)), channelId);
+    return true;
+  }
+
+  _sortCombatParticipants(participants = []) {
+    return [...participants].sort((a, b) => {
+      const initiative = Number(b.initiative_total || 0) - Number(a.initiative_total || 0);
+      if (initiative) return initiative;
+      const tie = Number(b.tiebreaker || 0) - Number(a.tiebreaker || 0);
+      if (tie) return tie;
+      const nameCompare = String(a.char_name || '').localeCompare(String(b.char_name || ''), undefined, { sensitivity: 'base' });
+      if (nameCompare) return nameCompare;
+      return Number(a.char_id || 0) - Number(b.char_id || 0);
+    });
   }
 
   grantLevelUp(charId, type, amount = 1) {

@@ -32,7 +32,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.5.2';
+const BOT_VERSION = '0.6.0';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -183,6 +183,21 @@ const commands = [
     .addIntegerOption(o => o.setName('character_id').setDescription('Character ID').setRequired(true))
     .addStringOption(o => o.setName('stat').setDescription('Ability or skill to set').setRequired(true).addChoices(...ALL_STAT_NAMES.map(s => ({ name: capitalize(s), value: s }))))
     .addIntegerOption(o => o.setName('value').setDescription('New value from 0 to 99').setMinValue(0).setMaxValue(99).setRequired(true)),
+
+
+  new SlashCommandBuilder()
+    .setName('combat')
+    .setDescription('Manage initiative combat in this channel')
+    .addSubcommand(s => s
+      .setName('start')
+      .setDescription('[ADMIN] Create a combat tracker in this channel'))
+    .addSubcommand(s => s
+      .setName('remove')
+      .setDescription('[ADMIN] Remove a character from this channel combat')
+      .addIntegerOption(o => o.setName('id').setDescription('Character ID to remove').setRequired(true)))
+    .addSubcommand(s => s
+      .setName('status')
+      .setDescription('Show the current combat tracker status')),
 ].map(c => c.toJSON());
 
 function resourceCommand(name, description) {
@@ -293,6 +308,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'adminsheet') return handleAdminSheet(interaction);
     if (interaction.commandName === 'adminlist') return handleAdminList(interaction);
     if (interaction.commandName === 'setstat') return handleSetStat(interaction);
+    if (interaction.commandName === 'combat') return handleCombat(interaction);
   } catch (err) {
     console.error(err);
     return interaction.editReply('Something went wrong while handling that command.');
@@ -553,6 +569,14 @@ async function handleInjury(interaction) {
 async function handleEnd(interaction) {
   const char = db.getActiveCharacter(interaction.user.id);
   if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
+
+  const combat = db.getCombat(interaction.channelId);
+  const inActiveCombat = combat && combat.status === 'active' && combat.participants.some(p => Number(p.char_id) === Number(char.id));
+  if (inActiveCombat && Number(combat.current_char_id) !== Number(char.id)) {
+    const current = combat.participants.find(p => Number(p.char_id) === Number(combat.current_char_id));
+    return interaction.editReply(`It is not **${char.char_name}**'s turn. Current turn: **${current?.char_name || 'Unknown'}**.`);
+  }
+
   const result = db.resetTurnResources(char.id);
   if (!result.success) return interaction.editReply(result.error);
   const lines = [`**${result.char.char_name}** ends their turn.`];
@@ -562,6 +586,19 @@ async function handleEnd(interaction) {
   lines.push('', `AP reset to **${fmt(result.char.traits.ap_current, result.char.traits.ap_max)}**.`);
   lines.push(`Movement reset to **${fmt(result.char.traits.movement_current, result.char.traits.movement_max)}**.`);
   await updatePinnedSheets(result.char.id);
+
+  if (inActiveCombat) {
+    const advanced = db.advanceCombatTurn(interaction.channelId, char.id);
+    if (advanced.success) {
+      await updateCombatTracker(interaction.channel, advanced.combat);
+      const next = advanced.combat.participants.find(p => Number(p.char_id) === Number(advanced.combat.current_char_id));
+      if (advanced.roundEnded) lines.push('', `**Round ${advanced.combat.round} begins.**`);
+      if (next) lines.push(`Next turn: **${next.char_name}**.`);
+    } else {
+      lines.push('', `Combat tracker warning: ${advanced.error}`);
+    }
+  }
+
   return interaction.editReply(lines.join('\n'));
 }
 
@@ -652,6 +689,132 @@ async function handleSetStat(interaction) {
 }
 
 
+async function handleCombat(interaction) {
+  const sub = interaction.options.getSubcommand();
+
+  if (sub === 'start') {
+    if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can create a combat tracker.');
+    const created = db.createCombat(interaction.guildId, interaction.channelId, interaction.user.id);
+    if (!created.success) return interaction.editReply(created.error);
+    const message = await interaction.editReply({ embeds: [combatTrackerEmbed(created.combat)], components: combatTrackerRows(created.combat) });
+    db.setCombatTrackerMessage(interaction.channelId, message.id);
+    const combat = db.getCombat(interaction.channelId);
+    await safePinMessage(message);
+    await updateCombatTracker(interaction.channel, combat);
+    return message;
+  }
+
+  if (sub === 'remove') {
+    if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can remove combat participants.');
+    const charId = interaction.options.getInteger('id');
+    const removed = db.removeCombatParticipant(interaction.channelId, charId);
+    if (!removed.success) return interaction.editReply(removed.error);
+    await updateCombatTracker(interaction.channel, removed.combat);
+    if (removed.removed?.sheet_message_id) {
+      await safeUnpinMessage(interaction.channel, removed.removed.sheet_message_id);
+      db.deleteSheetPost(removed.removed.sheet_message_id);
+    }
+    return interaction.editReply(`Removed **${removed.removed.char_name}** (ID: \`${removed.removed.char_id}\`) from combat.`);
+  }
+
+  if (sub === 'status') {
+    const combat = db.getCombat(interaction.channelId);
+    if (!combat || combat.status === 'ended') return interaction.editReply('There is no active combat in this channel.');
+    return interaction.editReply({ embeds: [combatTrackerEmbed(combat)], components: combatTrackerRows(combat) });
+  }
+}
+
+async function handleJoinCombatButton(interaction) {
+  await interaction.deferReply({ ephemeral: false });
+  const combat = db.getCombat(interaction.channelId);
+  if (!combat || combat.status === 'ended') return interaction.editReply('There is no active combat in this channel.');
+
+  const char = db.getActiveCharacter(interaction.user.id);
+  if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first.');
+  if (combat.participants.some(p => Number(p.char_id) === Number(char.id))) {
+    return interaction.editReply(`**${char.char_name}** is already in this combat.`);
+  }
+
+  const modifiers = db.rollModifiers(char, 'skill', 'reflex', 'agility', 'normal');
+  const rollData = dice.rollSkill('reflex', char.reflex, 'agility', char.agility, modifiers.mode, modifiers.flat, modifiers.notes);
+  db.recordRoll(char.id, 'reflex', 'agility', rollData.diceResult, rollData.modifier, rollData.total);
+
+  const sheetMessage = await interaction.channel.send(withBotFooter({ embeds: [characterSheetEmbed(char)] }));
+  db.upsertSheetPost(char.id, interaction.guildId, interaction.channelId, sheetMessage.id);
+  await safePinMessage(sheetMessage);
+
+  const added = db.addCombatParticipant(interaction.channelId, {
+    char_id: char.id,
+    user_id: char.user_id,
+    username: char.username,
+    char_name: char.char_name,
+    initiative_total: rollData.total,
+    initiative_roll: rollData.diceResult,
+    initiative_modifier: rollData.modifier,
+    tiebreaker: char.agility + char.reflex,
+    sheet_message_id: sheetMessage.id,
+    joined_at: new Date().toISOString(),
+  });
+  if (!added.success) return interaction.editReply(added.error);
+
+  await updateCombatTracker(interaction.channel, added.combat);
+  return interaction.editReply({ embeds: [initiativeJoinEmbed(char, rollData)] });
+}
+
+async function handleStartCombatButton(interaction) {
+  await interaction.deferReply({ ephemeral: false });
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can start combat.');
+  const started = db.startCombat(interaction.channelId);
+  if (!started.success) return interaction.editReply(started.error);
+  await updateCombatTracker(interaction.channel, started.combat);
+  const current = started.combat.participants.find(p => Number(p.char_id) === Number(started.combat.current_char_id));
+  return interaction.editReply(`Combat started. **Round ${started.combat.round}** begins with **${current?.char_name || 'Unknown'}**.`);
+}
+
+async function handleEndCombatButton(interaction) {
+  await interaction.deferReply({ ephemeral: false });
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can end combat.');
+  const ended = db.endCombat(interaction.channelId);
+  if (!ended.success) return interaction.editReply(ended.error);
+  await updateCombatTracker(interaction.channel, ended.combat);
+  return interaction.editReply('Combat ended.');
+}
+
+async function updateCombatTracker(channel, combat = null) {
+  const activeCombat = combat || db.getCombat(channel.id);
+  if (!activeCombat?.tracker_message_id) return false;
+  try {
+    const message = await channel.messages.fetch(activeCombat.tracker_message_id);
+    await message.edit(withBotFooter({ embeds: [combatTrackerEmbed(activeCombat)], components: combatTrackerRows(activeCombat) }));
+    return true;
+  } catch (err) {
+    console.warn(`Could not update combat tracker ${activeCombat.tracker_message_id}:`, err.message);
+    return false;
+  }
+}
+
+async function safePinMessage(message) {
+  try {
+    if (message && !message.pinned) await message.pin();
+    return true;
+  } catch (err) {
+    console.warn(`Could not pin message ${message?.id || 'unknown'}:`, err.message);
+    return false;
+  }
+}
+
+async function safeUnpinMessage(channel, messageId) {
+  try {
+    const message = await channel.messages.fetch(messageId);
+    if (message.pinned) await message.unpin();
+    return true;
+  } catch (err) {
+    console.warn(`Could not unpin message ${messageId}:`, err.message);
+    return false;
+  }
+}
+
+
 async function updatePinnedSheets(charId) {
   const posts = db.listSheetPosts(charId);
   if (!posts.length) return;
@@ -677,6 +840,10 @@ async function updatePinnedSheets(charId) {
 }
 
 async function handleButton(interaction) {
+  if (interaction.customId === 'combat_join') return handleJoinCombatButton(interaction);
+  if (interaction.customId === 'combat_start') return handleStartCombatButton(interaction);
+  if (interaction.customId === 'combat_end') return handleEndCombatButton(interaction);
+
   if (interaction.customId.startsWith('reroll_skill_')) {
     const [charIdRaw, skill, requestedModeRaw] = interaction.customId.replace('reroll_skill_', '').split('|');
     const requestedMode = requestedModeRaw || 'normal';
@@ -715,6 +882,72 @@ async function handleButton(interaction) {
     return interaction.reply({ embeds: [embed], components: [row] });
   }
 }
+
+function combatTrackerEmbed(combat) {
+  const statusLabel = combat.status === 'active' ? 'Active' : combat.status === 'ended' ? 'Ended' : 'Recruiting';
+  const current = combat.participants.find(p => Number(p.char_id) === Number(combat.current_char_id));
+  const lines = combat.participants.length
+    ? combat.participants.map((p, index) => {
+      const marker = Number(p.char_id) === Number(combat.current_char_id) ? '▶ ' : '';
+      return `${marker}**${index + 1}. ${escapeMarkdown(p.char_name)}** | ID: \`${p.char_id}\` | Initiative: **${p.initiative_total}** | Roll: ${p.initiative_roll} | Agi+Ref: ${p.tiebreaker}`;
+    })
+    : ['No participants yet. Players can press **Join Combat**.'];
+
+  const description = [
+    `Status: **${statusLabel}**`,
+    combat.status === 'active' ? `Round: **${combat.round}**` : null,
+    combat.status === 'active' ? `Current turn: **${current?.char_name || 'Unknown'}**` : null,
+    '',
+    ...lines,
+    '',
+    'Late joins are sorted into initiative immediately, but they do not interrupt the current turn.',
+  ].filter(x => x !== null).join('\n');
+
+  return new EmbedBuilder()
+    .setTitle('Combat Tracker')
+    .setDescription(description)
+    .setTimestamp();
+}
+
+function combatTrackerRows(combat) {
+  const disabled = combat?.status === 'ended';
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('combat_join')
+      .setLabel('Join Combat')
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(disabled),
+  );
+
+  if (combat?.status !== 'active') {
+    row.addComponents(new ButtonBuilder()
+      .setCustomId('combat_start')
+      .setLabel('Start Combat')
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(disabled));
+  }
+
+  row.addComponents(new ButtonBuilder()
+    .setCustomId('combat_end')
+    .setLabel('End Combat')
+    .setStyle(ButtonStyle.Danger)
+    .setDisabled(disabled));
+
+  return [row];
+}
+
+function initiativeJoinEmbed(char, rollData) {
+  return styleCharacterEmbed(new EmbedBuilder()
+    .setTitle('Joined Combat')
+    .setDescription(`**${char.char_name}** joins combat and rolls Reflex.`)
+    .addFields(
+      { name: 'Character ID', value: `\`${char.id}\``, inline: true },
+      { name: 'Initiative', value: `# ${rollData.total}`, inline: true },
+      { name: 'Tie Breaker', value: `Agility + Reflex = **${char.agility + char.reflex}**`, inline: true },
+      { name: 'Breakdown', value: rollData.breakdown, inline: false },
+    ), char);
+}
+
 
 function escapeMarkdown(value) {
   return String(value || '').replace(/([\\`*_{}[\]()#+.!|>~-])/g, '\\$1');
