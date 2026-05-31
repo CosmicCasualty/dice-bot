@@ -15,6 +15,7 @@ const {
 
 const Database = require('./database');
 const DiceEngine = require('./diceEngine');
+const { getNpc, listNpcs, getNpcAbility, getNpcSkill } = require('./npc-data');
 const {
   SKILL_TREE,
   ABILITIES,
@@ -32,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.5.2';
+const BOT_VERSION = '0.6.2';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -97,6 +98,25 @@ const commands = [
     .addStringOption(o => o.setName('stat').setDescription('Ability or skill to roll').setRequired(true).addChoices(...rollChoices))
     .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices))
     .addStringOption(o => o.setName('label').setDescription('Optional label').setRequired(false)),
+
+  new SlashCommandBuilder()
+    .setName('npcroll')
+    .setDescription('[ADMIN] Roll as a hardcoded NPC')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addStringOption(o => o.setName('npc').setDescription('NPC name, for example infected').setRequired(true))
+    .addStringOption(o => o.setName('stat').setDescription('Ability or skill to roll').setRequired(true).addChoices(...rollChoices))
+    .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices)),
+
+  new SlashCommandBuilder()
+    .setName('npclist')
+    .setDescription('[ADMIN] List hardcoded NPCs')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
+    .setName('npcsheet')
+    .setDescription('[ADMIN] Show a hardcoded NPC sheet')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addStringOption(o => o.setName('npc').setDescription('NPC name, for example infected').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('rollraw')
@@ -282,6 +302,9 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'select') return handleSelect(interaction);
     if (interaction.commandName === 'sheet') return handleSheet(interaction);
     if (interaction.commandName === 'roll') return handleRoll(interaction);
+    if (interaction.commandName === 'npcroll') return handleNpcRoll(interaction);
+    if (interaction.commandName === 'npclist') return handleNpcList(interaction);
+    if (interaction.commandName === 'npcsheet') return handleNpcSheet(interaction);
     if (interaction.commandName === 'rollraw') return handleRollRaw(interaction);
     if (interaction.commandName === 'history') return handleHistory(interaction);
     if (['ap', 'hp', 'movement', 'stress'].includes(interaction.commandName)) return handleResource(interaction, interaction.commandName);
@@ -447,6 +470,79 @@ async function handleRoll(interaction) {
   }
 
   return interaction.editReply('That roll option was not recognized.');
+}
+
+async function handleNpcRoll(interaction) {
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can roll as NPCs.');
+
+  const npcName = interaction.options.getString('npc');
+  const selected = interaction.options.getString('stat');
+  const requestedMode = interaction.options.getString('mode') || 'normal';
+  const npc = getNpc(npcName);
+
+  if (!npc) {
+    const names = listNpcs().map(n => `**${n.name}**`).join(', ') || 'none';
+    return interaction.editReply(`No hardcoded NPC named **${npcName}** found. Available NPCs: ${names}.`);
+  }
+
+  const [type, stat] = selected.split(':');
+
+  if (type === 'skill') {
+    const skill = stat;
+    const ability = db.getParentAbility(skill);
+    const rollData = dice.rollSkill(
+      skill,
+      getNpcSkill(npc, skill),
+      ability,
+      getNpcAbility(npc, ability),
+      requestedMode
+    );
+
+    return interaction.editReply({
+      embeds: [npcSkillRollEmbed(npc, skill, ability, rollData)],
+      components: [rerollNpcSkillRow(npc.key, skill, requestedMode)],
+    });
+  }
+
+  if (type === 'ability') {
+    const ability = stat;
+    const rollData = dice.rollAbility(ability, getNpcAbility(npc, ability), requestedMode);
+
+    return interaction.editReply({
+      embeds: [npcAbilityRollEmbed(npc, ability, rollData)],
+      components: [rerollNpcAbilityRow(npc.key, ability, requestedMode)],
+    });
+  }
+
+  return interaction.editReply('That NPC roll option was not recognized.');
+}
+
+async function handleNpcList(interaction) {
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list NPCs.');
+
+  const npcs = listNpcs();
+  if (!npcs.length) return interaction.editReply('No hardcoded NPCs are currently configured.');
+
+  const lines = npcs.map(npc => `**${npc.name}** | HP ${npc.hp}, AP ${npc.ap}, Movement ${npc.movement}`);
+  const embed = new EmbedBuilder()
+    .setTitle('Hardcoded NPCs')
+    .setDescription(lines.join('\n'));
+
+  return interaction.editReply({ embeds: [embed] });
+}
+
+async function handleNpcSheet(interaction) {
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can view NPC sheets.');
+
+  const npcName = interaction.options.getString('npc');
+  const npc = getNpc(npcName);
+
+  if (!npc) {
+    const names = listNpcs().map(n => `**${n.name}**`).join(', ') || 'none';
+    return interaction.editReply(`No hardcoded NPC named **${npcName}** found. Available NPCs: ${names}.`);
+  }
+
+  return interaction.editReply({ embeds: [npcSheetEmbed(npc)] });
 }
 
 async function handleRollRaw(interaction) {
@@ -706,6 +802,25 @@ async function handleButton(interaction) {
     return interaction.reply({ embeds: [abilityRollEmbed(char, ability, rollData)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
   }
 
+  if (interaction.customId.startsWith('reroll_npc_skill_')) {
+    const [npcKey, skill, requestedModeRaw] = interaction.customId.replace('reroll_npc_skill_', '').split('|');
+    const requestedMode = requestedModeRaw || 'normal';
+    const npc = getNpc(npcKey);
+    if (!npc) return interaction.reply({ content: 'NPC not found.', ephemeral: false });
+    const ability = db.getParentAbility(skill);
+    const rollData = dice.rollSkill(skill, getNpcSkill(npc, skill), ability, getNpcAbility(npc, ability), requestedMode);
+    return interaction.reply({ embeds: [npcSkillRollEmbed(npc, skill, ability, rollData)], components: [rerollNpcSkillRow(npc.key, skill, requestedMode)] });
+  }
+
+  if (interaction.customId.startsWith('reroll_npc_ability_')) {
+    const [npcKey, ability, requestedModeRaw] = interaction.customId.replace('reroll_npc_ability_', '').split('|');
+    const requestedMode = requestedModeRaw || 'normal';
+    const npc = getNpc(npcKey);
+    if (!npc) return interaction.reply({ content: 'NPC not found.', ephemeral: false });
+    const rollData = dice.rollAbility(ability, getNpcAbility(npc, ability), requestedMode);
+    return interaction.reply({ embeds: [npcAbilityRollEmbed(npc, ability, rollData)], components: [rerollNpcAbilityRow(npc.key, ability, requestedMode)] });
+  }
+
   if (interaction.customId.startsWith('rerollraw_')) {
     const notation = interaction.customId.replace('rerollraw_', '');
     const result = dice.roll(notation);
@@ -783,6 +898,52 @@ function abilityRollEmbed(char, ability, rollData, label = null) {
   return styleCharacterEmbed(embed, char);
 }
 
+function npcSheetEmbed(npc) {
+  const abilityLines = ABILITIES.map(ability => {
+    const abilityValue = getNpcAbility(npc, ability);
+    const skills = SKILL_TREE[ability]
+      .map(skill => `  ${capitalize(skill)}: **${getNpcSkill(npc, skill)}**`)
+      .join('\n');
+    return `**${capitalize(ability)}: ${abilityValue}**\n${skills}`;
+  }).join('\n\n');
+
+  return new EmbedBuilder()
+    .setTitle(`${npc.name} NPC Sheet`)
+    .setDescription(`Hardcoded NPC key: \`${npc.key}\``)
+    .addFields(
+      { name: 'Resources', value: npcResourcesString(npc), inline: true },
+      { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
+    );
+}
+
+function npcResourcesString(npc) {
+  return [
+    `HP: **${npc.hp ?? 0}**`,
+    `AP: **${npc.ap ?? 0}**`,
+    `Movement: **${npc.movement ?? 0}**`,
+  ].join('\n');
+}
+
+function npcSkillRollEmbed(npc, skill, ability, rollData) {
+  return baseRollEmbed(rollData)
+    .setTitle(`${npc.name} ${capitalize(skill)} Check${modeSuffix(rollData.mode)}`)
+    .setDescription(`**${npc.name}** rolls **d20 + ${capitalize(ability)} + ${capitalize(skill)}**`)
+    .addFields(
+      { name: 'Total', value: `# ${rollData.total}`, inline: true },
+      { name: 'Breakdown', value: rollData.breakdown, inline: false },
+    );
+}
+
+function npcAbilityRollEmbed(npc, ability, rollData) {
+  return baseRollEmbed(rollData)
+    .setTitle(`${npc.name} ${capitalize(ability)} Check${modeSuffix(rollData.mode)}`)
+    .setDescription(`**${npc.name}** rolls **d20 + ${capitalize(ability)}**`)
+    .addFields(
+      { name: 'Total', value: `# ${rollData.total}`, inline: true },
+      { name: 'Breakdown', value: rollData.breakdown, inline: false },
+    );
+}
+
 function rawRollEmbed(username, notation, result, title) {
   const embed = baseRollEmbed(result)
     .setTitle(title)
@@ -821,6 +982,18 @@ function rerollSkillRow(charId, skill, mode = 'normal') {
 function rerollAbilityRow(charId, ability, mode = 'normal') {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`reroll_ability_${charId}|${ability}|${mode}`).setLabel(`Roll ${capitalize(ability)} Again`).setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function rerollNpcSkillRow(npcKey, skill, mode = 'normal') {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`reroll_npc_skill_${npcKey}|${skill}|${mode}`).setLabel(`Roll ${capitalize(skill)} Again`).setStyle(ButtonStyle.Secondary)
+  );
+}
+
+function rerollNpcAbilityRow(npcKey, ability, mode = 'normal') {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`reroll_npc_ability_${npcKey}|${ability}|${mode}`).setLabel(`Roll ${capitalize(ability)} Again`).setStyle(ButtonStyle.Secondary)
   );
 }
 

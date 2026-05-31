@@ -1,5 +1,7 @@
 # Undead Archive Dice Bot User Guide
 
+Version: **0.6.2**
+
 ## Getting started
 
 1. Create your character with `/character create name:<name>`.
@@ -189,6 +191,56 @@ Lists active injuries on your selected character.
 ### `/advance stat:<ability-or-skill>`
 
 Spends one pending ability or skill level-up. Choose the ability or skill from the single `stat` option, similar to `/roll`.
+
+
+## NPC commands
+
+These commands require admin or moderator permissions. NPCs are hardcoded in `npc-data.js`, not created through Discord commands.
+
+The bot currently includes:
+
+- **Infected**: HP 3, AP 2, Movement 3, Physique 2, Agility 1, Melee 2, Resilience 2, Awareness 2, Intimidation 2. Any unlisted ability or skill defaults to 0.
+- **examplenpc**: HP 1, AP 1, Movement 1, all abilities 1, and all skills 1.
+
+### `/npclist`
+
+Lists all hardcoded NPCs with their HP, AP, and Movement.
+
+### `/npcsheet npc:<name>`
+
+Shows the full hardcoded NPC sheet, including resources, abilities, and all skill levels.
+
+Examples:
+
+```text
+/npcsheet npc:infected
+/npcsheet npc:examplenpc
+```
+
+### `/npcroll npc:<name> stat:<ability-or-skill> mode:<normal|adv|dis>`
+
+Rolls as a hardcoded NPC.
+
+Ability rolls use:
+
+```text
+d20 + ability
+```
+
+Skill rolls use:
+
+```text
+d20 + parent ability + skill
+```
+
+Examples:
+
+```text
+/npcroll npc:infected stat:Melee
+/npcroll npc:examplenpc stat:Awareness mode:adv
+```
+
+NPC traits are not calculated from ability or skill levels. Their resources and stat values come directly from `npc-data.js`.
 
 ## Admin commands
 
