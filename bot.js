@@ -26,12 +26,13 @@ const {
   CONDITION_DEFINITIONS,
   INJURY_DEFINITIONS,
   DEFAULT_CHARACTER_IMAGE_URL,
+  DEFAULT_EMBED_COLOR,
 } = require('./database');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.4.5';
+const BOT_VERSION = '0.5.1';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -64,6 +65,10 @@ const commands = [
       .setName('image')
       .setDescription('Set your selected character image')
       .addStringOption(o => o.setName('link').setDescription('Direct image link for your character').setRequired(true)))
+    .addSubcommand(s => s
+      .setName('color')
+      .setDescription('Set your selected character embed color')
+      .addStringOption(o => o.setName('color').setDescription('Hex color, for example #E3311D').setRequired(true)))
     .addSubcommand(s => s
       .setName('rename')
       .setDescription('Rename your selected character')
@@ -162,6 +167,18 @@ const commands = [
     .addIntegerOption(o => o.setName('amount').setDescription('How many to grant').setMinValue(1).setMaxValue(99).setRequired(false)),
 
   new SlashCommandBuilder()
+    .setName('adminsheet')
+    .setDescription('[ADMIN] Show the sheet of any character')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addUserOption(o => o.setName('user').setDescription('The player to display on the sheet request').setRequired(true))
+    .addIntegerOption(o => o.setName('id').setDescription('Character ID').setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName('adminlist')
+    .setDescription('[ADMIN] List all characters')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
+
+  new SlashCommandBuilder()
     .setName('setstat')
     .setDescription('[ADMIN] Set an ability or skill to a specific value')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
@@ -189,6 +206,28 @@ function isValidImageUrl(url) {
 
 function characterImageUrl(char) {
   return char?.char_image_url || DEFAULT_CHARACTER_IMAGE_URL;
+}
+
+function characterEmbedColor(char) {
+  const color = normalizeHexColor(char?.embed_color || DEFAULT_EMBED_COLOR);
+  return isValidHexColor(color) ? color : DEFAULT_EMBED_COLOR;
+}
+
+function normalizeHexColor(color) {
+  const raw = String(color || '').trim();
+  const withHash = raw.startsWith('#') ? raw : `#${raw}`;
+  return withHash.toUpperCase();
+}
+
+function isValidHexColor(color) {
+  return /^#?[0-9A-Fa-f]{6}$/.test(String(color || '').trim());
+}
+
+function styleCharacterEmbed(embed, char) {
+  if (!embed || !char) return embed;
+  embed.setColor(characterEmbedColor(char));
+  embed.setThumbnail(characterImageUrl(char));
+  return embed;
 }
 
 function patchInteractionFooter(interaction) {
@@ -254,6 +293,8 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'end') return handleEnd(interaction);
     if (interaction.commandName === 'advance') return handleAdvance(interaction);
     if (interaction.commandName === 'levelup') return handleLevelUp(interaction);
+    if (interaction.commandName === 'adminsheet') return handleAdminSheet(interaction);
+    if (interaction.commandName === 'adminlist') return handleAdminList(interaction);
     if (interaction.commandName === 'setstat') return handleSetStat(interaction);
   } catch (err) {
     console.error(err);
@@ -300,6 +341,18 @@ async function handleCharacter(interaction) {
     if (!result.success) return interaction.editReply(result.error);
     await updatePinnedSheets(char.id);
     return interaction.editReply(`Updated **${result.char.char_name}** image.`);
+  }
+
+  if (sub === 'color') {
+    const char = db.getActiveCharacter(interaction.user.id);
+    if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
+    const color = interaction.options.getString('color').trim();
+    if (!isValidHexColor(color)) return interaction.editReply('Please provide a valid hex color like `#E3311D` or `E3311D`.');
+    const normalizedColor = normalizeHexColor(color);
+    const result = db.setCharacterColor(interaction.user.id, char.id, normalizedColor);
+    if (!result.success) return interaction.editReply(result.error);
+    await updatePinnedSheets(char.id);
+    return interaction.editReply(`Updated **${result.char.char_name}** embed color to \`${result.embedColor}\`.`);
   }
 
   if (sub === 'rename') {
@@ -418,7 +471,7 @@ async function handleHistory(interaction) {
     const label = r.skill ? `${capitalize(r.skill)} (${capitalize(r.ability)})` : `${capitalize(r.ability)} ability`;
     return `**${i + 1}.** ${label} -> **${r.total}**`;
   }).join('\n');
-  const embed = new EmbedBuilder().setTitle(`${char.char_name}'s Recent Rolls`).setDescription(lines);
+  const embed = styleCharacterEmbed(new EmbedBuilder().setTitle(`${char.char_name}'s Recent Rolls`).setDescription(lines), char);
   return interaction.editReply({ embeds: [embed] });
 }
 
@@ -523,14 +576,14 @@ async function handleAdvance(interaction) {
   if (!['ability', 'skill'].includes(type) || !stat) return interaction.editReply('Choose an ability or skill to advance.');
   const result = db.spendLevelUp(char.id, type, stat);
   if (!result.success) return interaction.editReply(result.error);
-  const embed = new EmbedBuilder()
+  const embed = styleCharacterEmbed(new EmbedBuilder()
     .setTitle('Level Up Chosen')
     .setDescription(`**${result.charName}** increased **${capitalize(result.stat)}**.`)
     .addFields(
       { name: 'Old Value', value: `${result.old}`, inline: true },
       { name: 'New Value', value: `${result.new}`, inline: true },
       { name: 'Updated Traits', value: traitsString(result.traits), inline: false },
-    );
+    ), char);
   const pending = pendingLevelupsString(result);
   if (pending) embed.addFields({ name: 'Pending Level-Ups', value: pending, inline: false });
   await updatePinnedSheets(char.id);
@@ -550,6 +603,41 @@ async function handleLevelUp(interaction) {
   return interaction.editReply(`<@${targetUser.id}> received **${amount} ${type} level-up${amount === 1 ? '' : 's'}** for **${result.charName}**. They can spend it with \`/advance stat:<ability-or-skill>\`. Level-ups can raise stats up to **${LEVELUP_CAP}**.`);
 }
 
+async function handleAdminSheet(interaction) {
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can view any character sheet.');
+  const targetUser = interaction.options.getUser('user');
+  const charId = interaction.options.getInteger('id');
+  const char = db.getCharacterById(charId);
+  if (!char) return interaction.editReply(`No character with ID \`${charId}\` was found.`);
+  const embed = characterSheetEmbed(char);
+  if (targetUser.id !== char.user_id) {
+    embed.addFields({ name: 'Admin Note', value: `Requested user <@${targetUser.id}> does not own this character. Actual owner: <@${char.user_id}>.`, inline: false });
+  }
+  return interaction.editReply({ embeds: [embed] });
+}
+
+async function handleAdminList(interaction) {
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list all characters.');
+  const chars = db.listAllCharacters();
+  if (!chars.length) return interaction.editReply('No characters have been created yet.');
+
+  const lines = chars.map(c => `**${escapeMarkdown(c.char_name)}** | User: ${escapeMarkdown(c.username || c.user_id)} | ID: \`${c.id}\``);
+  const chunks = chunkLines(lines, 3900);
+  const visibleChunks = chunks.slice(0, 10);
+  if (chunks.length > 10) {
+    visibleChunks[9] = [
+      ...visibleChunks[9],
+      '',
+      `Showing the first ${visibleChunks.reduce((sum, chunk) => sum + chunk.filter(Boolean).length, 0)} entries. Use the database directly for the full list.`,
+    ];
+  }
+  const embeds = visibleChunks.map((chunk, index) => new EmbedBuilder()
+    .setTitle(index === 0 ? `All Characters (${chars.length})` : `All Characters (${chars.length}) continued`)
+    .setDescription(chunk.join('\n')));
+
+  return interaction.editReply({ embeds });
+}
+
 async function handleSetStat(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can set stats.');
   const targetUser = interaction.options.getUser('user');
@@ -560,7 +648,7 @@ async function handleSetStat(interaction) {
   if (!char || char.user_id !== targetUser.id) return interaction.editReply(`Character ID \`${charId}\` does not belong to ${targetUser.username}.`);
   const result = db.setStat(charId, stat, value);
   if (!result.success) return interaction.editReply(result.error);
-  const embed = new EmbedBuilder()
+  const embed = styleCharacterEmbed(new EmbedBuilder()
     .setTitle('Stat Updated')
     .setDescription(`<@${targetUser.id}>'s character **${result.charName}**`)
     .addFields(
@@ -568,7 +656,7 @@ async function handleSetStat(interaction) {
       { name: 'Old', value: `${result.old}`, inline: true },
       { name: 'New', value: `${result.new}`, inline: true },
       { name: 'Updated Traits', value: traitsString(result.traits), inline: false },
-    );
+    ), char);
   await updatePinnedSheets(charId);
   return interaction.editReply({ embeds: [embed] });
 }
@@ -638,13 +726,37 @@ async function handleButton(interaction) {
   }
 }
 
+function escapeMarkdown(value) {
+  return String(value || '').replace(/([\\`*_{}[\]()#+.!|>~-])/g, '\\$1');
+}
+
+function chunkLines(lines, maxLength) {
+  const chunks = [];
+  let current = [];
+  let length = 0;
+
+  for (const line of lines) {
+    const extraLength = current.length ? 1 + line.length : line.length;
+    if (current.length && length + extraLength > maxLength) {
+      chunks.push(current);
+      current = [];
+      length = 0;
+    }
+    current.push(line);
+    length += current.length === 1 ? line.length : extraLength;
+  }
+
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
 function characterSheetEmbed(char) {
   const abilityLines = ABILITIES.map(ability => {
     const skills = SKILL_TREE[ability].map(sk => `  ${capitalize(sk)}: **${char[sk]}**`).join('\n');
     return `**${capitalize(ability)}: ${char[ability]}**\n${skills}`;
   }).join('\n\n');
 
-  const embed = new EmbedBuilder()
+  const embed = styleCharacterEmbed(new EmbedBuilder()
     .setTitle(char.char_name)
     .setDescription(`Character of <@${char.user_id}> | ID: \`${char.id}\``)
     .addFields(
@@ -653,8 +765,7 @@ function characterSheetEmbed(char) {
       { name: 'Conditions', value: conditionsString(char), inline: false },
       { name: 'Injuries', value: injuriesString(char), inline: false },
       { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
-    );
-  embed.setThumbnail(characterImageUrl(char));
+    ), char);
   return embed;
 }
 
@@ -667,7 +778,7 @@ function skillRollEmbed(char, skill, ability, rollData, label = null) {
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
     );
   if (rollData.notes?.length) embed.addFields({ name: 'Condition Effects', value: rollData.notes.join('\n'), inline: false });
-  return embed;
+  return styleCharacterEmbed(embed, char);
 }
 
 function abilityRollEmbed(char, ability, rollData, label = null) {
@@ -679,7 +790,7 @@ function abilityRollEmbed(char, ability, rollData, label = null) {
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
     );
   if (rollData.notes?.length) embed.addFields({ name: 'Condition Effects', value: rollData.notes.join('\n'), inline: false });
-  return embed;
+  return styleCharacterEmbed(embed, char);
 }
 
 function rawRollEmbed(username, notation, result, title) {
@@ -695,15 +806,15 @@ function rawRollEmbed(username, notation, result, title) {
 }
 
 function conditionsEmbed(char) {
-  return new EmbedBuilder()
+  return styleCharacterEmbed(new EmbedBuilder()
     .setTitle(`${char.char_name}'s Conditions`)
-    .setDescription(conditionsString(char, true));
+    .setDescription(conditionsString(char, true)), char);
 }
 
 function injuriesEmbed(char) {
-  return new EmbedBuilder()
+  return styleCharacterEmbed(new EmbedBuilder()
     .setTitle(`${char.char_name}'s Injuries`)
-    .setDescription(injuriesString(char, true));
+    .setDescription(injuriesString(char, true)), char);
 }
 
 function baseRollEmbed(result) {

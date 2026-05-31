@@ -1,4 +1,5 @@
 # Undead Archive Dice Bot User Guide
+
 ## Getting started
 
 1. Create your character with `/character create name:<name>`.
@@ -29,9 +30,14 @@ Use the listed ID when selecting, switching, or deleting a character.
 
 ### `/character image link:<image-link>`
 
-Sets the image shown on your selected character sheet.
+Sets the image shown on your selected character-related embeds.
 
 The link must start with `http://` or `https://`. Direct image links work best.
+
+### `/character color color:<hexcode>`
+
+Sets the embed color used for your selected character. 
+This controls the colored line on the left side of character-related embeds.
 
 ### `/character rename name:<name>`
 
@@ -57,7 +63,9 @@ Selects one of your characters as active.
 
 Shows your active character sheet.
 
-When a sheet message is pinned, the bot remembers it and automatically updates it when visible sheet values change, including resources, derived traits, conditions, injuries, images, renames, and level-up changes.
+Character sheets use your selected character image and embed color.
+
+When a sheet message is pinned, the bot remembers it and automatically updates it when visible sheet values change.
 
 ## Rolling commands
 
@@ -182,14 +190,6 @@ Lists active injuries on your selected character.
 
 Spends one pending ability or skill level-up. Choose the ability or skill from the single `stat` option, similar to `/roll`.
 
-Examples:
-
-```text
-/advance stat:Physique
-/advance stat:Melee
-```
-
-
 ## Admin commands
 
 These commands require admin or moderator permissions.
@@ -201,6 +201,24 @@ Grants pending level-ups to a character.
 ### `/setstat user:<player> character_id:<id> stat:<stat> value:<number>`
 
 Sets an ability or skill to a specific value.
+
+### `/adminsheet user:<user> id:<id>`
+
+Shows the sheet for any character by character ID, regardless of who owns it.
+
+The `user` option is used for the request context, but the command can still show the sheet if the character belongs to someone else. If the selected user is not the actual owner, the embed includes an admin note with the actual owner.
+
+### `/adminlist`
+
+Lists all characters created on the bot.
+
+Each entry shows:
+
+- character name
+- user name
+- character ID
+
+If there are many characters, the command splits the list across multiple embeds.
 
 ## Tips
 

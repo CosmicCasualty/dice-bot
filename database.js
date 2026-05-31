@@ -21,6 +21,7 @@ const STARTING_SKILL_LEVELUPS = 5;
 const CREATION_SKILL_CAP = 3;
 const LEVELUP_CAP = 10;
 const DEFAULT_CHARACTER_IMAGE_URL = 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png';
+const DEFAULT_EMBED_COLOR = '#E3311D';
 
 const CONDITION_DEFINITIONS = {
   stunned: {
@@ -214,6 +215,7 @@ class DB {
         username TEXT NOT NULL,
         char_name TEXT NOT NULL,
         char_image_url TEXT DEFAULT 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png',
+        embed_color TEXT DEFAULT '#E3311D',
         active INTEGER DEFAULT 0,
         physique INTEGER DEFAULT 0,
         agility INTEGER DEFAULT 0,
@@ -301,6 +303,7 @@ class DB {
     this._addColumnIfMissing('characters', 'pending_ability_levelups', 'INTEGER DEFAULT 0');
     this._addColumnIfMissing('characters', 'creation_skill_levelups_remaining', 'INTEGER DEFAULT 0');
     this._addColumnIfMissing('characters', 'char_image_url', `TEXT DEFAULT '${DEFAULT_CHARACTER_IMAGE_URL}'`);
+    this._addColumnIfMissing('characters', 'embed_color', `TEXT DEFAULT '${DEFAULT_EMBED_COLOR}'`);
 
     this.db.prepare('UPDATE characters SET ap_max = ? WHERE ap_max IS NULL').run(DEFAULT_MAX_AP);
     this.db.prepare('UPDATE characters SET ap_current = ap_max WHERE ap_current IS NULL').run();
@@ -308,6 +311,7 @@ class DB {
     this.db.prepare('UPDATE characters SET pending_ability_levelups = 0 WHERE pending_ability_levelups IS NULL').run();
     this.db.prepare('UPDATE characters SET creation_skill_levelups_remaining = 0 WHERE creation_skill_levelups_remaining IS NULL').run();
     this.db.prepare("UPDATE characters SET char_image_url = ? WHERE char_image_url IS NULL OR TRIM(char_image_url) = ''").run(DEFAULT_CHARACTER_IMAGE_URL);
+    this.db.prepare("UPDATE characters SET embed_color = ? WHERE embed_color IS NULL OR TRIM(embed_color) = ''").run(DEFAULT_EMBED_COLOR);
   }
 
   _addColumnIfMissing(table, column, definition) {
@@ -351,15 +355,16 @@ class DB {
     const isFirst = existing.length === 0;
     const result = this.db.prepare(`
       INSERT INTO characters (
-        user_id, username, char_name, char_image_url, active, ap_current, ap_max, stress_current,
+        user_id, username, char_name, char_image_url, embed_color, active, ap_current, ap_max, stress_current,
         pending_skill_levelups, pending_ability_levelups, creation_skill_levelups_remaining
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       userId,
       username,
       charName,
       DEFAULT_CHARACTER_IMAGE_URL,
+      DEFAULT_EMBED_COLOR,
       isFirst ? 1 : 0,
       DEFAULT_MAX_AP,
       DEFAULT_MAX_AP,
@@ -385,6 +390,10 @@ class DB {
 
   listCharacters(userId) {
     return this.db.prepare('SELECT * FROM characters WHERE user_id = ? ORDER BY created_at ASC').all(userId).map(row => this._withTraits(row));
+  }
+
+  listAllCharacters() {
+    return this.db.prepare('SELECT * FROM characters ORDER BY username COLLATE NOCASE ASC, char_name COLLATE NOCASE ASC, id ASC').all().map(row => this._withTraits(row));
   }
 
   setActiveCharacter(userId, charId) {
@@ -425,6 +434,14 @@ class DB {
     if (!char) return { success: false, error: `No character with ID ${charId} found for you.` };
     this.db.prepare('UPDATE characters SET char_image_url = ? WHERE id = ?').run(url, charId);
     return { success: true, imageUrl: url, char: this.getCharacterById(charId, userId) };
+  }
+
+  setCharacterColor(userId, charId, embedColor) {
+    const color = String(embedColor || '').trim().toUpperCase();
+    const char = this.getCharacterById(charId, userId);
+    if (!char) return { success: false, error: `No character with ID ${charId} found for you.` };
+    this.db.prepare('UPDATE characters SET embed_color = ? WHERE id = ?').run(color, charId);
+    return { success: true, embedColor: color, char: this.getCharacterById(charId, userId) };
   }
 
 
@@ -767,6 +784,7 @@ module.exports.STARTING_SKILL_LEVELUPS = STARTING_SKILL_LEVELUPS;
 module.exports.CREATION_SKILL_CAP = CREATION_SKILL_CAP;
 module.exports.LEVELUP_CAP = LEVELUP_CAP;
 module.exports.DEFAULT_CHARACTER_IMAGE_URL = DEFAULT_CHARACTER_IMAGE_URL;
+module.exports.DEFAULT_EMBED_COLOR = DEFAULT_EMBED_COLOR;
 module.exports.CONDITION_DEFINITIONS = CONDITION_DEFINITIONS;
 module.exports.INJURY_DEFINITIONS = INJURY_DEFINITIONS;
 module.exports.normalizeName = normalizeName;
