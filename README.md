@@ -194,19 +194,17 @@ Spends one pending ability or skill level-up. Choose the ability or skill from t
 
 These commands require admin or moderator permissions.
 
-### `/levelup user:<player> character_id:<id> type:<skill|ability> amount:<number>`
+### `/levelup character_id:<id> type:<skill|ability> amount:<number>`
 
 Grants pending level-ups to a character.
 
-### `/setstat user:<player> character_id:<id> stat:<stat> value:<number>`
+### `/setstat character_id:<id> stat:<stat> value:<number>`
 
 Sets an ability or skill to a specific value.
 
-### `/adminsheet user:<user> id:<id>`
+### `/adminsheet id:<id>`
 
 Shows the sheet for any character by character ID, regardless of who owns it.
-
-The `user` option is used for the request context, but the command can still show the sheet if the character belongs to someone else. If the selected user is not the actual owner, the embed includes an admin note with the actual owner.
 
 ### `/adminlist`
 

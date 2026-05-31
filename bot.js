@@ -32,7 +32,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.5.1';
+const BOT_VERSION = '0.5.2';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -157,7 +157,6 @@ const commands = [
     .setName('levelup')
     .setDescription('[ADMIN] Grant a pending skill or ability level-up')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('The player').setRequired(true))
     .addIntegerOption(o => o.setName('character_id').setDescription('Character ID').setRequired(true))
     .addStringOption(o => o
       .setName('type')
@@ -170,7 +169,6 @@ const commands = [
     .setName('adminsheet')
     .setDescription('[ADMIN] Show the sheet of any character')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('The player to display on the sheet request').setRequired(true))
     .addIntegerOption(o => o.setName('id').setDescription('Character ID').setRequired(true)),
 
   new SlashCommandBuilder()
@@ -182,7 +180,6 @@ const commands = [
     .setName('setstat')
     .setDescription('[ADMIN] Set an ability or skill to a specific value')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addUserOption(o => o.setName('user').setDescription('The player').setRequired(true))
     .addIntegerOption(o => o.setName('character_id').setDescription('Character ID').setRequired(true))
     .addStringOption(o => o.setName('stat').setDescription('Ability or skill to set').setRequired(true).addChoices(...ALL_STAT_NAMES.map(s => ({ name: capitalize(s), value: s }))))
     .addIntegerOption(o => o.setName('value').setDescription('New value from 0 to 99').setMinValue(0).setMaxValue(99).setRequired(true)),
@@ -592,28 +589,22 @@ async function handleAdvance(interaction) {
 
 async function handleLevelUp(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can grant level-ups.');
-  const targetUser = interaction.options.getUser('user');
   const charId = interaction.options.getInteger('character_id');
   const type = interaction.options.getString('type');
   const amount = interaction.options.getInteger('amount') || 1;
   const char = db.getCharacterById(charId);
-  if (!char || char.user_id !== targetUser.id) return interaction.editReply(`Character ID \`${charId}\` does not belong to ${targetUser.username}.`);
+  if (!char) return interaction.editReply(`No character with ID \`${charId}\` was found.`);
   const result = db.grantLevelUp(charId, type, amount);
   if (!result.success) return interaction.editReply(result.error);
-  return interaction.editReply(`<@${targetUser.id}> received **${amount} ${type} level-up${amount === 1 ? '' : 's'}** for **${result.charName}**. They can spend it with \`/advance stat:<ability-or-skill>\`. Level-ups can raise stats up to **${LEVELUP_CAP}**.`);
+  return interaction.editReply(`<@${char.user_id}> received **${amount} ${type} level-up${amount === 1 ? '' : 's'}** for **${result.charName}**. They can spend it with \`/advance stat:<ability-or-skill>\`. Level-ups can raise stats up to **${LEVELUP_CAP}**.`);
 }
 
 async function handleAdminSheet(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can view any character sheet.');
-  const targetUser = interaction.options.getUser('user');
   const charId = interaction.options.getInteger('id');
   const char = db.getCharacterById(charId);
   if (!char) return interaction.editReply(`No character with ID \`${charId}\` was found.`);
-  const embed = characterSheetEmbed(char);
-  if (targetUser.id !== char.user_id) {
-    embed.addFields({ name: 'Admin Note', value: `Requested user <@${targetUser.id}> does not own this character. Actual owner: <@${char.user_id}>.`, inline: false });
-  }
-  return interaction.editReply({ embeds: [embed] });
+  return interaction.editReply({ embeds: [characterSheetEmbed(char)] });
 }
 
 async function handleAdminList(interaction) {
@@ -640,17 +631,16 @@ async function handleAdminList(interaction) {
 
 async function handleSetStat(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can set stats.');
-  const targetUser = interaction.options.getUser('user');
   const charId = interaction.options.getInteger('character_id');
   const stat = interaction.options.getString('stat');
   const value = interaction.options.getInteger('value');
   const char = db.getCharacterById(charId);
-  if (!char || char.user_id !== targetUser.id) return interaction.editReply(`Character ID \`${charId}\` does not belong to ${targetUser.username}.`);
+  if (!char) return interaction.editReply(`No character with ID \`${charId}\` was found.`);
   const result = db.setStat(charId, stat, value);
   if (!result.success) return interaction.editReply(result.error);
   const embed = styleCharacterEmbed(new EmbedBuilder()
     .setTitle('Stat Updated')
-    .setDescription(`<@${targetUser.id}>'s character **${result.charName}**`)
+    .setDescription(`<@${char.user_id}>'s character **${result.charName}**`)
     .addFields(
       { name: 'Stat', value: capitalize(stat), inline: true },
       { name: 'Old', value: `${result.old}`, inline: true },
