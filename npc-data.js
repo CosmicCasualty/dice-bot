@@ -12,6 +12,7 @@ const NPCS = {
     hp: 1,
     ap: 1,
     movement: 1,
+    wikiUrl: 'https://www.staff.theundeadarchive.com/Test',
     abilities: {
       physique: 1,
       agility: 1,
@@ -43,6 +44,7 @@ const NPCS = {
     hp: 1,
     ap: 2,
     movement: 5,
+    wikiUrl: 'https://www.staff.theundeadarchive.com/Chicken',
     abilities: {
       agility: 2,
     },
@@ -56,6 +58,7 @@ const NPCS = {
     hp: 3,
     ap: 2,
     movement: 3,
+    wikiUrl: 'https://www.staff.theundeadarchive.com/Infected',
     abilities: {
       physique: 2,
       agility: 1,

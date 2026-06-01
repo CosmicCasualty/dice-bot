@@ -1,7 +1,4 @@
 # Undead Archive Dice Bot User Guide
-
-Version: **0.6.2**
-
 ## Getting started
 
 1. Create your character with `/character create name:<name>`.

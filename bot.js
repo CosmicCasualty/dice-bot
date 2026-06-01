@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.2';
+const BOT_VERSION = '0.6.3';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -51,6 +51,18 @@ const rollModeChoices = [
   { name: 'Advantage', value: 'adv' },
   { name: 'Disadvantage', value: 'dis' },
 ];
+
+function sortByName(items, nameGetter = item => item.name) {
+  return [...items].sort((a, b) => String(nameGetter(a) || '').localeCompare(String(nameGetter(b) || ''), undefined, { sensitivity: 'base' }));
+}
+
+function npcAutocompleteChoices(focusedValue) {
+  const query = String(focusedValue || '').toLowerCase();
+  return sortByName(listNpcs())
+    .filter(npc => npc.name.toLowerCase().includes(query) || npc.key.toLowerCase().includes(query))
+    .slice(0, 25)
+    .map(npc => ({ name: npc.name, value: npc.key }));
+}
 
 const commands = [
   new SlashCommandBuilder()
@@ -116,7 +128,7 @@ const commands = [
     .setName('npcsheet')
     .setDescription('[ADMIN] Show a hardcoded NPC sheet')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addStringOption(o => o.setName('npc').setDescription('NPC name, for example infected').setRequired(true)),
+    .addStringOption(o => o.setName('npc').setDescription('NPC name, for example infected').setRequired(true).setAutocomplete(true)),
 
   new SlashCommandBuilder()
     .setName('rollraw')
@@ -292,6 +304,7 @@ client.once('ready', async () => {
 
 client.on('interactionCreate', async interaction => {
   patchInteractionFooter(interaction);
+  if (interaction.isAutocomplete()) return handleAutocomplete(interaction);
   if (interaction.isButton()) return handleButton(interaction);
   if (!interaction.isChatInputCommand()) return;
 
@@ -321,6 +334,19 @@ client.on('interactionCreate', async interaction => {
     return interaction.editReply('Something went wrong while handling that command.');
   }
 });
+
+async function handleAutocomplete(interaction) {
+  try {
+    if (interaction.commandName === 'npcsheet') {
+      const focusedValue = interaction.options.getFocused();
+      return interaction.respond(npcAutocompleteChoices(focusedValue));
+    }
+    return interaction.respond([]);
+  } catch (err) {
+    console.error('Autocomplete failed:', err);
+    return interaction.respond([]);
+  }
+}
 
 async function handleCharacter(interaction) {
   const sub = interaction.options.getSubcommand();
@@ -481,7 +507,7 @@ async function handleNpcRoll(interaction) {
   const npc = getNpc(npcName);
 
   if (!npc) {
-    const names = listNpcs().map(n => `**${n.name}**`).join(', ') || 'none';
+    const names = sortByName(listNpcs()).map(n => `**${n.name}**`).join(', ') || 'none';
     return interaction.editReply(`No hardcoded NPC named **${npcName}** found. Available NPCs: ${names}.`);
   }
 
@@ -520,7 +546,7 @@ async function handleNpcRoll(interaction) {
 async function handleNpcList(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list NPCs.');
 
-  const npcs = listNpcs();
+  const npcs = sortByName(listNpcs());
   if (!npcs.length) return interaction.editReply('No hardcoded NPCs are currently configured.');
 
   const lines = npcs.map(npc => `**${npc.name}** | HP ${npc.hp}, AP ${npc.ap}, Movement ${npc.movement}`);
@@ -538,7 +564,7 @@ async function handleNpcSheet(interaction) {
   const npc = getNpc(npcName);
 
   if (!npc) {
-    const names = listNpcs().map(n => `**${n.name}**`).join(', ') || 'none';
+    const names = sortByName(listNpcs()).map(n => `**${n.name}**`).join(', ') || 'none';
     return interaction.editReply(`No hardcoded NPC named **${npcName}** found. Available NPCs: ${names}.`);
   }
 
@@ -705,7 +731,7 @@ async function handleAdminSheet(interaction) {
 
 async function handleAdminList(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list all characters.');
-  const chars = db.listAllCharacters();
+  const chars = sortByName(db.listAllCharacters(), c => c.char_name);
   if (!chars.length) return interaction.editReply('No characters have been created yet.');
 
   const lines = chars.map(c => `**${escapeMarkdown(c.char_name)}** | User: ${escapeMarkdown(c.username || c.user_id)} | ID: \`${c.id}\``);
@@ -909,7 +935,7 @@ function npcSheetEmbed(npc) {
 
   return new EmbedBuilder()
     .setTitle(`${npc.name} NPC Sheet`)
-    .setDescription(`Hardcoded NPC key: \`${npc.key}\``)
+    .setDescription(npc.wikiUrl ? `Hardcoded NPC key: \`${npc.key}\`\n[Staff Wiki](${npc.wikiUrl})` : `Hardcoded NPC key: \`${npc.key}\``)
     .addFields(
       { name: 'Resources', value: npcResourcesString(npc), inline: true },
       { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
