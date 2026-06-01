@@ -44,7 +44,7 @@ const NPCS = {
     ap: 2,
     movement: 5,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Chicken',
-    image: 'https://png.pngtree.com/png-clipart/20240428/original/pngtree-chicken-hen-png-image_14965893.png',
+    image: 'https://media.discordapp.net/attachments/1381481140249952276/1510914242315026492/standing-rooster-with-colorful-plumage-against-whi-2026-03-16-04-46-55-utc.JPG',
     color: '#e7eae5',
     abilities: {
       agility: 2,
@@ -60,6 +60,7 @@ const NPCS = {
     ap: 2,
     movement: 3,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Infected',
+    image: 'https://static.wikia.nocookie.net/monster/images/8/8c/InfectedScan.jpg',
     abilities: {
       physique: 2,
       agility: 1,
@@ -69,6 +70,24 @@ const NPCS = {
       resilience: 2,
       awareness: 2,
       intimidation: 2,
+    },
+  },
+  infected: {
+    key: 'gaseous',
+    name: 'Gaseous Infected',
+    hp: 2,
+    ap: 2,
+    movement: 2,
+    wikiUrl: 'https://www.staff.theundeadarchive.com/Gaseous_Infected',
+    image: 'https://static.wikia.nocookie.net/left4dead/images/3/38/Boomer_2.png',
+    abilities: {
+      physique: 2,
+    },
+    skills: {
+      melee: 1,
+      resilience: 4,
+      awareness: 3,
+      intimidation: 3,
     },
   },
 

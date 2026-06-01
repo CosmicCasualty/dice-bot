@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.5';
+const BOT_VERSION = '0.6.6';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -937,7 +937,7 @@ function npcSheetEmbed(npc) {
   }).join('\n\n');
 
   return styleNpcEmbed(new EmbedBuilder()
-    .setTitle(`${npc.name} NPC Sheet`)
+    .setTitle(`${npc.name}`)
     .setURL(npc.wikiUrl ?? null)
     .addFields(
       { name: 'Resources', value: npcResourcesString(npc), inline: true },
