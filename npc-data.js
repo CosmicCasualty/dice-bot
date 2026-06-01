@@ -72,7 +72,7 @@ const NPCS = {
       intimidation: 2,
     },
   },
-  infected: {
+  gaseous: {
     key: 'gaseous',
     name: 'Gaseous Infected',
     hp: 2,
