@@ -15,7 +15,7 @@ const {
 
 const Database = require('./database');
 const DiceEngine = require('./diceEngine');
-const { getNpc, listNpcs, getNpcAbility, getNpcSkill } = require('./npc-data');
+const { getNpc, listNpcs, getNpcAbility, getNpcSkill, getNpcTraits } = require('./npc-data');
 const {
   SKILL_TREE,
   ABILITIES,
@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.6';
+const BOT_VERSION = '0.6.7';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -549,13 +549,24 @@ async function handleNpcRoll(interaction) {
   return interaction.editReply('That NPC roll option was not recognized.');
 }
 
+
+function npcLink(npc) {
+  return npc?.wikiUrl ?? null;
+}
+
+function npcListName(npc) {
+  const link = npcLink(npc);
+  if (link) return `[${npc.name}](${link})`;
+  return npc.name;
+}
+
 async function handleNpcList(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list NPCs.');
 
   const npcs = sortByName(listNpcs());
   if (!npcs.length) return interaction.editReply('No hardcoded NPCs are currently configured.');
 
-  const lines = npcs.map(npc => `**${npc.name}** | HP ${npc.hp}, AP ${npc.ap}, Movement ${npc.movement}`);
+  const lines = npcs.map(npc => npcListName(npc));
   const embed = new EmbedBuilder()
     .setTitle('Hardcoded NPCs')
     .setDescription(lines.join('\n'));
@@ -938,18 +949,31 @@ function npcSheetEmbed(npc) {
 
   return styleNpcEmbed(new EmbedBuilder()
     .setTitle(`${npc.name}`)
-    .setURL(npc.wikiUrl ?? null)
+    .setURL(npcLink(npc))
     .addFields(
       { name: 'Resources', value: npcResourcesString(npc), inline: true },
+      { name: 'Traits', value: npcTraitsString(npc), inline: true },
       { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
     ), npc);
 }
 
 function npcResourcesString(npc) {
+  const t = getNpcTraits(npc);
   return [
-    `HP: **${npc.hp ?? 0}**`,
-    `AP: **${npc.ap ?? 0}**`,
-    `Movement: **${npc.movement ?? 0}**`,
+    `HP: **${t.health}**`,
+    `AP: **${t.ap}**`,
+    `Movement: **${t.movement}**`,
+    `Stress: **${t.stress}**`,
+  ].join('\n');
+}
+
+function npcTraitsString(npc) {
+  const t = getNpcTraits(npc);
+  return [
+    `Base Defense DC: **${t.base_defense}**`,
+    `Dodge Defense DC: **${t.dodge_defense}**`,
+    `Parry Defense DC: **${t.parry_defense}**`,
+    `Detection DC: **${t.detection}**`,
   ].join('\n');
 }
 

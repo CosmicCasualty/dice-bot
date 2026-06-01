@@ -1,6 +1,6 @@
 {
   "name": "discord-rpg-dice-bot",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "description": "Discord bot for the Undead Archive Dice System. www.theundeadarchive.com",
   "main": "bot.js",
   "scripts": {

@@ -1,14 +1,23 @@
 const DEFAULT_NPC_EMBED_COLOR = '#E3311D';
 const DEFAULT_NPC_IMAGE_URL = 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png';
+const DEFAULT_MAX_AP = 4;
 
 const NPCS = {
   /*
     examplenpc: {
     key: 'examplenpc',
     name: 'examplenpc',
-    hp: 1,
+
+    // Optional resource/trait overrides. If omitted, they are calculated from abilities and skills.
+    hp: 1,       
     ap: 1,
     movement: 1,
+    stress: 1,
+    base_defense: 12, 
+    dodge_defense: 12,
+    parry_defense: 12,    
+    detection: 12,         
+
     wikiUrl: 'https://www.staff.theundeadarchive.com/Test',
     color: '#FFC0CB',
     image: 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png',
@@ -43,6 +52,7 @@ const NPCS = {
     hp: 1,
     ap: 2,
     movement: 5,
+    stress:1,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Chicken',
     image: 'https://media.discordapp.net/attachments/1381481140249952276/1510914242315026492/standing-rooster-with-colorful-plumage-against-whi-2026-03-16-04-46-55-utc.JPG',
     color: '#e7eae5',
@@ -59,6 +69,7 @@ const NPCS = {
     hp: 3,
     ap: 2,
     movement: 3,
+    stress:0,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Infected',
     image: 'https://static.wikia.nocookie.net/monster/images/8/8c/InfectedScan.jpg',
     abilities: {
@@ -78,6 +89,7 @@ const NPCS = {
     hp: 2,
     ap: 2,
     movement: 2,
+    stress:0,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Gaseous_Infected',
     image: 'https://static.wikia.nocookie.net/left4dead/images/3/38/Boomer_2.png',
     abilities: {
@@ -126,9 +138,60 @@ function getNpcSkill(npc, skill) {
   return Number(npc?.skills?.[skill] ?? 0);
 }
 
+function firstNumber(...values) {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function calculatedNpcTraits(npc) {
+  const physique = getNpcAbility(npc, 'physique');
+  const agility = getNpcAbility(npc, 'agility');
+  const presence = getNpcAbility(npc, 'presence');
+  const athletics = getNpcSkill(npc, 'athletics');
+  const reflex = getNpcSkill(npc, 'reflex');
+  const resilience = getNpcSkill(npc, 'resilience');
+  const melee = getNpcSkill(npc, 'melee');
+  const stealth = getNpcSkill(npc, 'stealth');
+
+  return {
+    health: 5 + physique + Math.floor(resilience / 2),
+    movement: 3 + Math.floor((athletics + reflex) / 2),
+    stress: 3 + presence,
+    ap: DEFAULT_MAX_AP,
+    base_defense: 10 + resilience,
+    dodge_defense: 10 + agility + reflex,
+    parry_defense: 10 + physique + melee,
+    detection: 10 + agility + stealth,
+  };
+}
+
+function getNpcTraits(npc) {
+  const calculated = calculatedNpcTraits(npc);
+
+  const health = firstNumber(npc?.health, npc?.hp, npc?.health_max) ?? calculated.health;
+  const movement = firstNumber(npc?.movement, npc?.movement_max) ?? calculated.movement;
+  const stress = firstNumber(npc?.stress, npc?.stress_max) ?? calculated.stress;
+  const ap = firstNumber(npc?.ap, npc?.ap_max) ?? calculated.ap;
+
+  return {
+    health,
+    hp: health,
+    movement,
+    stress,
+    ap,
+    base_defense: firstNumber(npc?.base_defense, npc?.base_defense_dc, npc?.defense, npc?.defense_dc) ?? calculated.base_defense,
+    dodge_defense: firstNumber(npc?.dodge_defense, npc?.dodge_defense_dc, npc?.dodge, npc?.dodge_dc) ?? calculated.dodge_defense,
+    parry_defense: firstNumber(npc?.parry_defense, npc?.parry_defense_dc, npc?.parry, npc?.parry_dc) ?? calculated.parry_defense,
+    detection: firstNumber(npc?.detection, npc?.detection_dc) ?? calculated.detection,
+  };
+}
+
 module.exports = {
   getNpc,
   listNpcs,
   getNpcAbility,
   getNpcSkill,
+  getNpcTraits,
 };
