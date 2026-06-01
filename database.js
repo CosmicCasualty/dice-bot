@@ -21,7 +21,7 @@ const STARTING_SKILL_LEVELUPS = 5;
 const CREATION_SKILL_CAP = 3;
 const LEVELUP_CAP = 10;
 const DEFAULT_CHARACTER_IMAGE_URL = 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png';
-const DEFAULT_EMBED_COLOR = '#E3311D';
+const DEFAULT_EMBED_COLOR = '#AAACA1';
 
 const CONDITION_DEFINITIONS = {
   stunned: {
@@ -214,8 +214,8 @@ class DB {
         user_id TEXT NOT NULL,
         username TEXT NOT NULL,
         char_name TEXT NOT NULL,
-        char_image_url TEXT DEFAULT 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png',
-        embed_color TEXT DEFAULT '#E3311D',
+        char_image_url TEXT DEFAULT '${DEFAULT_CHARACTER_IMAGE_URL}',
+        embed_color TEXT DEFAULT '${DEFAULT_EMBED_COLOR}',
         active INTEGER DEFAULT 0,
         physique INTEGER DEFAULT 0,
         agility INTEGER DEFAULT 0,

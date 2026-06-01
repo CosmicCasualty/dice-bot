@@ -1,8 +1,5 @@
-const { ABILITIES, ALL_SKILLS } = require('./database');
-
-function oneEach(items) {
-  return Object.fromEntries(items.map(item => [item, 1]));
-}
+const DEFAULT_NPC_EMBED_COLOR = '#E3311D';
+const DEFAULT_NPC_IMAGE_URL = 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png';
 
 const NPCS = {
   /*
@@ -13,6 +10,8 @@ const NPCS = {
     ap: 1,
     movement: 1,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Test',
+    color: '#FFC0CB',
+    image: 'https://media.discordapp.net/attachments/1476395797888110624/1476395798953459794/logo.png',
     abilities: {
       physique: 1,
       agility: 1,
@@ -45,6 +44,8 @@ const NPCS = {
     ap: 2,
     movement: 5,
     wikiUrl: 'https://www.staff.theundeadarchive.com/Chicken',
+    image: 'https://png.pngtree.com/png-clipart/20240428/original/pngtree-chicken-hen-png-image_14965893.png',
+    color: '#e7eae5',
     abilities: {
       agility: 2,
     },
@@ -74,6 +75,15 @@ const NPCS = {
 
 };
 
+function withNpcDefaults(npc) {
+  if (!npc) return null;
+  return {
+    color: DEFAULT_NPC_EMBED_COLOR,
+    image: DEFAULT_NPC_IMAGE_URL,
+    ...npc,
+  };
+}
+
 function normalizeNpcKey(name) {
   return String(name || '').trim().toLowerCase().replace(/\s+/g, '');
 }
@@ -82,11 +92,11 @@ function getNpc(name) {
   const key = normalizeNpcKey(name);
   const npc = NPCS[key];
   if (!npc) return null;
-  return { ...npc, key };
+  return withNpcDefaults({ ...npc, key });
 }
 
 function listNpcs() {
-  return Object.values(NPCS);
+  return Object.values(NPCS).map(withNpcDefaults);
 }
 
 function getNpcAbility(npc, ability) {

@@ -33,13 +33,11 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.3';
+const BOT_VERSION = '0.6.5';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
 const ALL_STAT_NAMES = [...ABILITIES, ...ALL_SKILL_NAMES];
-const abilityChoices = ABILITIES.map(a => ({ name: capitalize(a), value: a }));
-const skillChoices = ALL_SKILL_NAMES.map(s => ({ name: capitalize(s), value: s }));
 const rollChoices = [
   ...ABILITIES.map(a => ({ name: `${capitalize(a)} (Ability)`, value: `ability:${a}` })),
   ...ALL_SKILLS.map(({ skill, ability }) => ({ name: `${capitalize(skill)} (${capitalize(ability)} Skill)`, value: `skill:${skill}` })),
@@ -72,24 +70,24 @@ const commands = [
       .setName('create')
       .setDescription('Create a new character')
       .addStringOption(o => o.setName('name').setDescription('Your character name').setRequired(true)))
-    .addSubcommand(s => s.setName('list').setDescription('List all your characters'))
-    .addSubcommand(s => s.setName('sheet').setDescription('Show your currently selected character sheet'))
+    .addSubcommand(s => s.setName('list').setDescription('List characters'))
+    .addSubcommand(s => s.setName('sheet').setDescription('Show character sheet'))
     .addSubcommand(s => s
       .setName('image')
-      .setDescription('Set your selected character image')
-      .addStringOption(o => o.setName('link').setDescription('Direct image link for your character').setRequired(true)))
+      .setDescription('Set character image')
+      .addStringOption(o => o.setName('link').setDescription('Image link for character').setRequired(true)))
     .addSubcommand(s => s
       .setName('color')
-      .setDescription('Set your selected character embed color')
-      .addStringOption(o => o.setName('color').setDescription('Hex color, for example #E3311D').setRequired(true)))
+      .setDescription('Set embed color')
+      .addStringOption(o => o.setName('color').setDescription(`Example ${DEFAULT_EMBED_COLOR}`).setRequired(true)))
     .addSubcommand(s => s
       .setName('rename')
-      .setDescription('Rename your selected character')
+      .setDescription('Rename character')
       .addStringOption(o => o.setName('name').setDescription('New character name').setRequired(true)))
     .addSubcommand(s => s
       .setName('switch')
-      .setDescription('Switch your active character')
-      .addIntegerOption(o => o.setName('id').setDescription('Character ID from /character list').setRequired(true)))
+      .setDescription('Switch character')
+      .addIntegerOption(o => o.setName('id').setDescription('Character ID').setRequired(true)))
     .addSubcommand(s => s
       .setName('delete')
       .setDescription('Delete one of your characters')
@@ -97,12 +95,12 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('select')
-    .setDescription('Select which of your characters is currently active')
-    .addIntegerOption(o => o.setName('id').setDescription('Character ID from /character list').setRequired(true)),
+    .setDescription('Select character')
+    .addIntegerOption(o => o.setName('id').setDescription('Character ID').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('sheet')
-    .setDescription('Show your currently selected character sheet'),
+    .setDescription('Show your selected character'),
 
   new SlashCommandBuilder()
     .setName('roll')
@@ -113,22 +111,22 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('npcroll')
-    .setDescription('[ADMIN] Roll as a hardcoded NPC')
+    .setDescription('[ADMIN]')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addStringOption(o => o.setName('npc').setDescription('NPC name, for example infected').setRequired(true))
+    .addStringOption(o => o.setName('npc').setDescription('NPC name').setRequired(true))
     .addStringOption(o => o.setName('stat').setDescription('Ability or skill to roll').setRequired(true).addChoices(...rollChoices))
     .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices)),
 
   new SlashCommandBuilder()
     .setName('npclist')
-    .setDescription('[ADMIN] List hardcoded NPCs')
+    .setDescription('[ADMIN]')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
 
   new SlashCommandBuilder()
     .setName('npcsheet')
-    .setDescription('[ADMIN] Show a hardcoded NPC sheet')
+    .setDescription('[ADMIN]')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addStringOption(o => o.setName('npc').setDescription('NPC name, for example infected').setRequired(true).setAutocomplete(true)),
+    .addStringOption(o => o.setName('npc').setDescription('NPC name').setRequired(true).setAutocomplete(true)),
 
   new SlashCommandBuilder()
     .setName('rollraw')
@@ -138,7 +136,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('history')
-    .setDescription('View your selected character last 10 rolls'),
+    .setDescription('View character last 10 rolls'),
 
   resourceCommand('ap', 'Adjust your selected character AP. Use a negative amount to spend AP.'),
   resourceCommand('hp', 'Adjust your selected character health. Use a negative amount to take damage.'),
@@ -147,12 +145,12 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('condition')
-    .setDescription('Add, remove, or list conditions for your selected character')
+    .setDescription('Add, remove, or list conditions for character')
     .addSubcommand(s => s
       .setName('add')
       .setDescription('Add a condition')
       .addStringOption(o => o.setName('name').setDescription('Condition name').setRequired(true).addChoices(...conditionChoices))
-      .addIntegerOption(o => o.setName('time').setDescription('Rounds. Defaults to 1.').setMinValue(1).setMaxValue(99).setRequired(false)))
+      .addIntegerOption(o => o.setName('time').setDescription('Rounds.').setMinValue(1).setMaxValue(99).setRequired(false)))
     .addSubcommand(s => s
       .setName('remove')
       .setDescription('Remove a condition')
@@ -161,7 +159,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('injury')
-    .setDescription('Add, remove, or list injuries for your selected character')
+    .setDescription('Add, remove, or list injuries')
     .addSubcommand(s => s
       .setName('add')
       .setDescription('Add an injury')
@@ -174,7 +172,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('end')
-    .setDescription('End your turn: apply end-turn effects, reset AP/movement, tick manual conditions'),
+    .setDescription('End your turn'),
 
   new SlashCommandBuilder()
     .setName('advance')
@@ -187,7 +185,7 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('levelup')
-    .setDescription('[ADMIN] Grant a pending skill or ability level-up')
+    .setDescription('[ADMIN]')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
     .addIntegerOption(o => o.setName('character_id').setDescription('Character ID').setRequired(true))
     .addStringOption(o => o
@@ -256,6 +254,14 @@ function styleCharacterEmbed(embed, char) {
   if (!embed || !char) return embed;
   embed.setColor(characterEmbedColor(char));
   embed.setThumbnail(characterImageUrl(char));
+  return embed;
+}
+
+function styleNpcEmbed(embed, npc) {
+  if (!embed || !npc) return embed;
+  const color = normalizeHexColor(npc.color);
+  if (isValidHexColor(color)) embed.setColor(color);
+  if (npc.image) embed.setThumbnail(npc.image);
   return embed;
 }
 
@@ -393,7 +399,7 @@ async function handleCharacter(interaction) {
     const char = db.getActiveCharacter(interaction.user.id);
     if (!char) return interaction.editReply('You have no selected character. Use `/select id:<character id>` first. If you do not have a character yet, use `/character create`.');
     const color = interaction.options.getString('color').trim();
-    if (!isValidHexColor(color)) return interaction.editReply('Please provide a valid hex color like `#E3311D` or `E3311D`.');
+    if (!isValidHexColor(color)) return interaction.editReply(`Please provide a valid hex color like \`${DEFAULT_EMBED_COLOR}\` or \`${DEFAULT_EMBED_COLOR.slice(1)}\`.`);
     const normalizedColor = normalizeHexColor(color);
     const result = db.setCharacterColor(interaction.user.id, char.id, normalizedColor);
     if (!result.success) return interaction.editReply(result.error);
@@ -889,7 +895,6 @@ function characterSheetEmbed(char) {
 
   const embed = styleCharacterEmbed(new EmbedBuilder()
     .setTitle(char.char_name)
-    .setDescription(`Character of <@${char.user_id}> | ID: \`${char.id}\``)
     .addFields(
       { name: 'Resources', value: resourcesString(char), inline: true },
       { name: 'Traits', value: derivedTraitsString(char.traits), inline: false },
@@ -903,7 +908,6 @@ function characterSheetEmbed(char) {
 function skillRollEmbed(char, skill, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
     .setTitle(label || `${capitalize(skill)} Check${modeSuffix(rollData.mode)}`)
-    .setDescription(`**${char.char_name}** rolls **d20 + ${capitalize(ability)} + ${capitalize(skill)}**`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
@@ -915,7 +919,6 @@ function skillRollEmbed(char, skill, ability, rollData, label = null) {
 function abilityRollEmbed(char, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
     .setTitle(label || `${capitalize(ability)} Check${modeSuffix(rollData.mode)}`)
-    .setDescription(`**${char.char_name}** rolls **d20 + ${capitalize(ability)}**`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
@@ -933,13 +936,13 @@ function npcSheetEmbed(npc) {
     return `**${capitalize(ability)}: ${abilityValue}**\n${skills}`;
   }).join('\n\n');
 
-  return new EmbedBuilder()
+  return styleNpcEmbed(new EmbedBuilder()
     .setTitle(`${npc.name} NPC Sheet`)
-    .setDescription(npc.wikiUrl ? `Hardcoded NPC key: \`${npc.key}\`\n[Staff Wiki](${npc.wikiUrl})` : `Hardcoded NPC key: \`${npc.key}\``)
+    .setURL(npc.wikiUrl ?? null)
     .addFields(
       { name: 'Resources', value: npcResourcesString(npc), inline: true },
       { name: 'Abilities and Skill Levels', value: abilityLines, inline: false },
-    );
+    ), npc);
 }
 
 function npcResourcesString(npc) {
@@ -951,23 +954,21 @@ function npcResourcesString(npc) {
 }
 
 function npcSkillRollEmbed(npc, skill, ability, rollData) {
-  return baseRollEmbed(rollData)
+  return styleNpcEmbed(baseRollEmbed(rollData)
     .setTitle(`${npc.name} ${capitalize(skill)} Check${modeSuffix(rollData.mode)}`)
-    .setDescription(`**${npc.name}** rolls **d20 + ${capitalize(ability)} + ${capitalize(skill)}**`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
-    );
+    ), npc);
 }
 
 function npcAbilityRollEmbed(npc, ability, rollData) {
-  return baseRollEmbed(rollData)
+  return styleNpcEmbed(baseRollEmbed(rollData)
     .setTitle(`${npc.name} ${capitalize(ability)} Check${modeSuffix(rollData.mode)}`)
-    .setDescription(`**${npc.name}** rolls **d20 + ${capitalize(ability)}**`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
-    );
+    ), npc);
 }
 
 function rawRollEmbed(username, notation, result, title) {
