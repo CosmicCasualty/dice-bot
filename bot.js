@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.7';
+const BOT_VERSION = '0.6.8';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -109,14 +109,13 @@ const commands = [
     .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices))
     .addStringOption(o => o.setName('label').setDescription('Optional label').setRequired(false)),
 
-  new SlashCommandBuilder()
+new SlashCommandBuilder()
     .setName('npcroll')
     .setDescription('[ADMIN]')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
-    .addStringOption(o => o.setName('npc').setDescription('NPC name').setRequired(true))
+    .addStringOption(o => o.setName('npc').setDescription('NPC name').setRequired(true).setAutocomplete(true))
     .addStringOption(o => o.setName('stat').setDescription('Ability or skill to roll').setRequired(true).addChoices(...rollChoices))
     .addStringOption(o => o.setName('mode').setDescription('Normal, advantage, or disadvantage').setRequired(false).addChoices(...rollModeChoices)),
-
   new SlashCommandBuilder()
     .setName('npclist')
     .setDescription('[ADMIN]')
@@ -343,7 +342,7 @@ client.on('interactionCreate', async interaction => {
 
 async function handleAutocomplete(interaction) {
   try {
-    if (interaction.commandName === 'npcsheet') {
+    if (interaction.commandName === 'npcsheet' || interaction.commandName === 'npcroll') {
       const focusedValue = interaction.options.getFocused();
       return interaction.respond(npcAutocompleteChoices(focusedValue));
     }
@@ -514,7 +513,7 @@ async function handleNpcRoll(interaction) {
 
   if (!npc) {
     const names = sortByName(listNpcs()).map(n => `**${n.name}**`).join(', ') || 'none';
-    return interaction.editReply(`No hardcoded NPC named **${npcName}** found. Available NPCs: ${names}.`);
+    return interaction.editReply(`No NPC named **${npcName}** found. Available NPCs: ${names}.`);
   }
 
   const [type, stat] = selected.split(':');
@@ -564,11 +563,11 @@ async function handleNpcList(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list NPCs.');
 
   const npcs = sortByName(listNpcs());
-  if (!npcs.length) return interaction.editReply('No hardcoded NPCs are currently configured.');
+  if (!npcs.length) return interaction.editReply('No NPCs are currently configured.');
 
   const lines = npcs.map(npc => npcListName(npc));
   const embed = new EmbedBuilder()
-    .setTitle('Hardcoded NPCs')
+    .setTitle('NPCs')
     .setDescription(lines.join('\n'));
 
   return interaction.editReply({ embeds: [embed] });
@@ -582,7 +581,7 @@ async function handleNpcSheet(interaction) {
 
   if (!npc) {
     const names = sortByName(listNpcs()).map(n => `**${n.name}**`).join(', ') || 'none';
-    return interaction.editReply(`No hardcoded NPC named **${npcName}** found. Available NPCs: ${names}.`);
+    return interaction.editReply(`No NPC named **${npcName}** found. Available NPCs: ${names}.`);
   }
 
   return interaction.editReply({ embeds: [npcSheetEmbed(npc)] });
