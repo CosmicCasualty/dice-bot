@@ -376,6 +376,43 @@ class DB {
     return result.lastInsertRowid;
   }
 
+  copyCharacterToUser(sourceCharId, targetUserId, targetUsername) {
+    const source = this.db.prepare('SELECT * FROM characters WHERE id = ?').get(sourceCharId);
+    if (!source) return { success: false, error: `No character with ID ${sourceCharId}.` };
+    if (!targetUserId) return { success: false, error: 'A target player is required.' };
+
+    const copyTransaction = this.db.transaction(() => {
+      const hasCharacters = this.db.prepare('SELECT 1 FROM characters WHERE user_id = ? LIMIT 1').get(targetUserId);
+      const columnsToCopy = this.db.prepare('PRAGMA table_info(characters)')
+        .all()
+        .map(c => c.name)
+        .filter(name => !['id', 'user_id', 'username', 'active', 'created_at'].includes(name));
+      const insertColumns = ['user_id', 'username', 'active', ...columnsToCopy];
+      const quotedColumns = insertColumns.map(name => `"${name}"`).join(', ');
+      const placeholders = insertColumns.map(() => '?').join(', ');
+      const values = [targetUserId, targetUsername || targetUserId, hasCharacters ? 0 : 1, ...columnsToCopy.map(name => source[name])];
+      const result = this.db.prepare(`INSERT INTO characters (${quotedColumns}) VALUES (${placeholders})`).run(...values);
+      const newCharId = result.lastInsertRowid;
+
+      const conditions = this.db.prepare('SELECT name, rounds, source FROM character_conditions WHERE char_id = ?').all(sourceCharId);
+      const insertCondition = this.db.prepare('INSERT INTO character_conditions (char_id, name, rounds, source) VALUES (?, ?, ?, ?)');
+      for (const condition of conditions) {
+        insertCondition.run(newCharId, condition.name, condition.rounds, condition.source);
+      }
+
+      const injuries = this.db.prepare('SELECT name FROM character_injuries WHERE char_id = ?').all(sourceCharId);
+      const insertInjury = this.db.prepare('INSERT INTO character_injuries (char_id, name) VALUES (?, ?)');
+      for (const injury of injuries) {
+        insertInjury.run(newCharId, injury.name);
+      }
+
+      return newCharId;
+    });
+
+    const newCharId = copyTransaction();
+    return { success: true, source: this.getCharacterById(sourceCharId), copy: this.getCharacterById(newCharId) };
+  }
+
   getCharacterById(charId, userId = null) {
     const row = this.db.prepare('SELECT * FROM characters WHERE id = ?').get(charId);
     if (!row) return null;

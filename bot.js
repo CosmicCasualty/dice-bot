@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.8';
+const BOT_VERSION = '0.6.9';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -201,6 +201,13 @@ new SlashCommandBuilder()
     .addIntegerOption(o => o.setName('id').setDescription('Character ID').setRequired(true)),
 
   new SlashCommandBuilder()
+    .setName('sheetcopy')
+    .setDescription('[ADMIN] Copy a character sheet to another player')
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles)
+    .addIntegerOption(o => o.setName('id').setDescription('Character ID to copy').setRequired(true))
+    .addUserOption(o => o.setName('player').setDescription('Player who will own the copied character').setRequired(false)),
+
+  new SlashCommandBuilder()
     .setName('adminlist')
     .setDescription('[ADMIN] List all characters')
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageRoles),
@@ -332,6 +339,7 @@ client.on('interactionCreate', async interaction => {
     if (interaction.commandName === 'advance') return handleAdvance(interaction);
     if (interaction.commandName === 'levelup') return handleLevelUp(interaction);
     if (interaction.commandName === 'adminsheet') return handleAdminSheet(interaction);
+    if (interaction.commandName === 'sheetcopy') return handleSheetCopy(interaction);
     if (interaction.commandName === 'adminlist') return handleAdminList(interaction);
     if (interaction.commandName === 'setstat') return handleSetStat(interaction);
   } catch (err) {
@@ -745,6 +753,21 @@ async function handleAdminSheet(interaction) {
   return interaction.editReply({ embeds: [characterSheetEmbed(char)] });
 }
 
+async function handleSheetCopy(interaction) {
+  if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can copy character sheets.');
+  const charId = interaction.options.getInteger('id');
+  const targetUser = interaction.options.getUser('player') || interaction.user;
+  const result = db.copyCharacterToUser(charId, targetUser.id, targetUser.username);
+  if (!result.success) return interaction.editReply(result.error);
+  const sourceOwner = result.source.username || result.source.user_id;
+  const targetOwner = `<@${targetUser.id}>`;
+  return interaction.editReply(
+    `Copied **${escapeMarkdown(result.source.char_name)}** from ${escapeMarkdown(sourceOwner)} to ${targetOwner}. ` +
+    `New character ID: \`${result.copy.id}\`.` +
+    (result.copy.active ? ' It was selected automatically because this player had no other characters.' : '')
+  );
+}
+
 async function handleAdminList(interaction) {
   if (!isModerator(interaction.member)) return interaction.editReply('Only admins or moderators can list all characters.');
   const chars = sortByName(db.listAllCharacters(), c => c.char_name);
@@ -917,7 +940,7 @@ function characterSheetEmbed(char) {
 
 function skillRollEmbed(char, skill, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
-    .setTitle(label || `${capitalize(skill)} Check${modeSuffix(rollData.mode)}`)
+    .setTitle(label || `char.char_name makes a ${capitalize(skill)} Roll${modeSuffix(rollData.mode)}`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
@@ -928,7 +951,7 @@ function skillRollEmbed(char, skill, ability, rollData, label = null) {
 
 function abilityRollEmbed(char, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
-    .setTitle(label || `${capitalize(ability)} Check${modeSuffix(rollData.mode)}`)
+    .setTitle(label || `char.char_name makes a ${capitalize(ability)} Roll${modeSuffix(rollData.mode)}`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },

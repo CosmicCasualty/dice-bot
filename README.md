@@ -208,6 +208,12 @@ Each entry shows:
 
 If there are many characters, the command splits the list across multiple embeds.
 
+### `/sheetcopy id:<id> player:<user>`
+
+Copies any character by character ID and gives the copy to a player.
+
+The `player` option is optional. If it is not set, the copy is given to the admin or moderator who used the command.
+
 ## Tips
 
 - Use `/character list` when you forget a character ID.
