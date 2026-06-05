@@ -120,27 +120,7 @@ const NPCS = {
       reflex: 3,
     },
   },
-  frenzied: {
-    key: 'frenzied',
-    name: 'Frenzied Infected',
-    hp: 2,
-    ap: 3,
-    movement: 5,
-    stress:0,
-    wikiUrl: 'https://www.staff.theundeadarchive.com/Tackler_Infected',
-    image: 'https://static.wikia.nocookie.net/worldwarzgame/images/e/e0/Lurker_close_up.jpg',
-    abilities: {
-      physique: 1,
-      agility: 3,
-    },
-    skills: {
-      athletics: 3,
-      melee: 1,
-      resilience: 2,
-      reflex: 3,
-    },
-  },
-  frenzied: {
+  inciting: {
     key: 'inciting',
     name: 'Inciting Infected',
     hp: 2,
