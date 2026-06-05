@@ -940,7 +940,7 @@ function characterSheetEmbed(char) {
 
 function skillRollEmbed(char, skill, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
-    .setTitle(label || `char.char_name makes a ${capitalize(skill)} Roll${modeSuffix(rollData.mode)}`)
+    .setTitle(label || `${char.char_name}makes a ${capitalize(skill)} Roll${modeSuffix(rollData.mode)}`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
@@ -951,7 +951,7 @@ function skillRollEmbed(char, skill, ability, rollData, label = null) {
 
 function abilityRollEmbed(char, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
-    .setTitle(label || `char.char_name makes a ${capitalize(ability)} Roll${modeSuffix(rollData.mode)}`)
+    .setTitle(label || `${char.char_name} makes a ${capitalize(ability)} Roll${modeSuffix(rollData.mode)}`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
