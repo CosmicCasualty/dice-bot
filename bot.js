@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.6.9';
+const BOT_VERSION = '0.7.0';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -371,7 +371,7 @@ async function handleCharacter(interaction) {
     const id = db.createCharacter(interaction.user.id, interaction.user.username, name);
     return interaction.editReply(
       `Character **${name}** created and saved. ID: \`${id}\`. ` +
-      (wasFirstCharacter ? 'This is your first character, so it has been automatically selected as active. ' : `Use \`/select id:${id}\` to make this your active character. `) +
+      (wasFirstCharacter ? '' : `Use \`/select id:${id}\` to make this your active character. `) +
       `New characters start with **${STARTING_ABILITY_LEVELUPS} ability level-ups** and **${STARTING_SKILL_LEVELUPS} skill level-ups**. ` +
       `Starting skill level-ups cannot raise a skill above **${CREATION_SKILL_CAP}**.`
     );
@@ -381,7 +381,7 @@ async function handleCharacter(interaction) {
     const chars = db.listCharacters(interaction.user.id);
     if (!chars.length) return interaction.editReply('You have no characters yet. Use `/character create` to make one.');
     const lines = chars.map(c => {
-      const active = c.active ? 'Selected' : 'Not selected';
+      const active = c.active ? 'Selected' : '';
       const parts = [`${active} | **[${c.id}]** ${c.char_name}`, `AP ${fmt(c.traits.ap_current, c.traits.ap_max)}`, `HP ${fmt(c.traits.health_current, c.traits.health_max)}`];
       return parts.join(' | ');
     }).join('\n');
@@ -427,7 +427,7 @@ async function handleCharacter(interaction) {
   if (sub === 'switch') {
     const id = interaction.options.getInteger('id');
     const ok = db.setActiveCharacter(interaction.user.id, id);
-    if (!ok) return interaction.editReply(`No character with ID \`${id}\` found for you.`);
+    if (!ok) return interaction.editReply(`No character with ID \`${id}\` `);
     const char = db.getCharacterById(id);
     return interaction.editReply(`Selected **${char.char_name}** as your active character.`);
   }
@@ -435,7 +435,7 @@ async function handleCharacter(interaction) {
   if (sub === 'delete') {
     const id = interaction.options.getInteger('id');
     const char = db.getCharacterById(id, interaction.user.id);
-    if (!char) return interaction.editReply(`No character with ID \`${id}\` found for you.`);
+    if (!char) return interaction.editReply(`No character with ID \`${id}\` `);
     db.deleteCharacter(interaction.user.id, id);
     return interaction.editReply(`Character **${char.char_name}** deleted.`);
   }
@@ -444,7 +444,7 @@ async function handleCharacter(interaction) {
 async function handleSelect(interaction) {
   const id = interaction.options.getInteger('id');
   const ok = db.setActiveCharacter(interaction.user.id, id);
-  if (!ok) return interaction.editReply(`No character with ID \`${id}\` found for you. Use \`/character list\` to see your characters.`);
+  if (!ok) return interaction.editReply(`No character with ID \`${id}\`  Use \`/character list\` to see your characters.`);
   const char = db.getCharacterById(id);
   return interaction.editReply(`Selected **${char.char_name}** as your active character. Use \`/sheet\` to view them.`);
 }
@@ -492,11 +492,6 @@ async function handleRoll(interaction) {
     const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, skill, ability, rollData.diceResult, rollData.modifier, rollData.total);
     let sheetChar = char;
-    if (db.hasCondition(char, 'hidden') && ['melee', 'aiming'].includes(skill)) {
-      const removed = db.removeCondition(char.id, 'hidden');
-      if (removed.success) sheetChar = removed.char;
-      await updatePinnedSheets(char.id);
-    }
     return interaction.editReply({ embeds: [skillRollEmbed(sheetChar, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
@@ -940,7 +935,7 @@ function characterSheetEmbed(char) {
 
 function skillRollEmbed(char, skill, ability, rollData, label = null) {
   const embed = baseRollEmbed(rollData)
-    .setTitle(label || `${char.char_name}makes a ${capitalize(skill)} Roll${modeSuffix(rollData.mode)}`)
+    .setTitle(label || `${char.char_name} makes a ${capitalize(skill)} Roll${modeSuffix(rollData.mode)}`)
     .addFields(
       { name: 'Total', value: `# ${rollData.total}`, inline: true },
       { name: 'Breakdown', value: rollData.breakdown, inline: false },
