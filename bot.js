@@ -33,7 +33,7 @@ const {
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 const db = new Database();
 const dice = new DiceEngine();
-const BOT_VERSION = '0.7.0';
+const BOT_VERSION = '0.7.1';
 const BOT_FOOTER = `Undead Archive Dice Bot, V${BOT_VERSION}`;
 
 const ALL_SKILL_NAMES = ALL_SKILLS.map(s => s.skill);
@@ -271,6 +271,10 @@ function styleNpcEmbed(embed, npc) {
   return embed;
 }
 
+function rollRequesterContent(interaction) {
+  return `<@${interaction.user.id}>`;
+}
+
 function patchInteractionFooter(interaction) {
   if (interaction.__undeadFooterPatched) return;
   interaction.__undeadFooterPatched = true;
@@ -492,7 +496,7 @@ async function handleRoll(interaction) {
     const rollData = dice.rollSkill(skill, char[skill], ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, skill, ability, rollData.diceResult, rollData.modifier, rollData.total);
     let sheetChar = char;
-    return interaction.editReply({ embeds: [skillRollEmbed(sheetChar, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
+    return interaction.editReply({ content: rollRequesterContent(interaction), embeds: [skillRollEmbed(sheetChar, skill, ability, rollData, label)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
   if (type === 'ability') {
@@ -500,7 +504,7 @@ async function handleRoll(interaction) {
     const modifiers = db.rollModifiers(char, 'ability', ability, null, requestedMode);
     const rollData = dice.rollAbility(ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, null, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    return interaction.editReply({ embeds: [abilityRollEmbed(char, ability, rollData, label)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
+    return interaction.editReply({ content: rollRequesterContent(interaction), embeds: [abilityRollEmbed(char, ability, rollData, label)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
   }
 
   return interaction.editReply('That roll option was not recognized.');
@@ -533,6 +537,7 @@ async function handleNpcRoll(interaction) {
     );
 
     return interaction.editReply({
+      content: rollRequesterContent(interaction),
       embeds: [npcSkillRollEmbed(npc, skill, ability, rollData)],
       components: [rerollNpcSkillRow(npc.key, skill, requestedMode)],
     });
@@ -543,6 +548,7 @@ async function handleNpcRoll(interaction) {
     const rollData = dice.rollAbility(ability, getNpcAbility(npc, ability), requestedMode);
 
     return interaction.editReply({
+      content: rollRequesterContent(interaction),
       embeds: [npcAbilityRollEmbed(npc, ability, rollData)],
       components: [rerollNpcAbilityRow(npc.key, ability, requestedMode)],
     });
@@ -597,7 +603,7 @@ async function handleRollRaw(interaction) {
   if (!result.success) return interaction.editReply(result.error);
   const embed = rawRollEmbed(interaction.user.username, notation, result, label || 'Free Roll');
   const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rerollraw_${notation}`).setLabel('Roll Again').setStyle(ButtonStyle.Secondary));
-  return interaction.editReply({ embeds: [embed], components: [row] });
+  return interaction.editReply({ content: rollRequesterContent(interaction), embeds: [embed], components: [row] });
 }
 
 async function handleHistory(interaction) {
@@ -642,7 +648,10 @@ async function handleResource(interaction, commandName) {
   }
 
   await updatePinnedSheets(result.char.id);
-  return interaction.editReply(message);
+  const payload = resource === 'stress' && result.hitFull
+    ? `${rollRequesterContent(interaction)}\n\n${message}`
+    : message;
+  return interaction.editReply(payload);
 }
 
 async function handleCondition(interaction) {
@@ -848,7 +857,7 @@ async function handleButton(interaction) {
       if (removed.success) sheetChar = removed.char;
       await updatePinnedSheets(char.id);
     }
-    return interaction.reply({ embeds: [skillRollEmbed(sheetChar, skill, ability, rollData)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
+    return interaction.reply({ content: rollRequesterContent(interaction), embeds: [skillRollEmbed(sheetChar, skill, ability, rollData)], components: [rerollSkillRow(char.id, skill, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('reroll_ability_')) {
@@ -859,7 +868,7 @@ async function handleButton(interaction) {
     const modifiers = db.rollModifiers(char, 'ability', ability, null, requestedMode);
     const rollData = dice.rollAbility(ability, char[ability], modifiers.mode, modifiers.flat, modifiers.notes);
     db.recordRoll(char.id, null, ability, rollData.diceResult, rollData.modifier, rollData.total);
-    return interaction.reply({ embeds: [abilityRollEmbed(char, ability, rollData)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
+    return interaction.reply({ content: rollRequesterContent(interaction), embeds: [abilityRollEmbed(char, ability, rollData)], components: [rerollAbilityRow(char.id, ability, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('reroll_npc_skill_')) {
@@ -869,7 +878,7 @@ async function handleButton(interaction) {
     if (!npc) return interaction.reply({ content: 'NPC not found.', ephemeral: false });
     const ability = db.getParentAbility(skill);
     const rollData = dice.rollSkill(skill, getNpcSkill(npc, skill), ability, getNpcAbility(npc, ability), requestedMode);
-    return interaction.reply({ embeds: [npcSkillRollEmbed(npc, skill, ability, rollData)], components: [rerollNpcSkillRow(npc.key, skill, requestedMode)] });
+    return interaction.reply({ content: rollRequesterContent(interaction), embeds: [npcSkillRollEmbed(npc, skill, ability, rollData)], components: [rerollNpcSkillRow(npc.key, skill, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('reroll_npc_ability_')) {
@@ -878,7 +887,7 @@ async function handleButton(interaction) {
     const npc = getNpc(npcKey);
     if (!npc) return interaction.reply({ content: 'NPC not found.', ephemeral: false });
     const rollData = dice.rollAbility(ability, getNpcAbility(npc, ability), requestedMode);
-    return interaction.reply({ embeds: [npcAbilityRollEmbed(npc, ability, rollData)], components: [rerollNpcAbilityRow(npc.key, ability, requestedMode)] });
+    return interaction.reply({ content: rollRequesterContent(interaction), embeds: [npcAbilityRollEmbed(npc, ability, rollData)], components: [rerollNpcAbilityRow(npc.key, ability, requestedMode)] });
   }
 
   if (interaction.customId.startsWith('rerollraw_')) {
@@ -887,7 +896,7 @@ async function handleButton(interaction) {
     if (!result.success) return interaction.reply({ content: result.error, ephemeral: false });
     const embed = rawRollEmbed(interaction.user.username, notation, result, 'Re-Roll');
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`rerollraw_${notation}`).setLabel('Roll Again').setStyle(ButtonStyle.Secondary));
-    return interaction.reply({ embeds: [embed], components: [row] });
+    return interaction.reply({ content: rollRequesterContent(interaction), embeds: [embed], components: [row] });
   }
 }
 
